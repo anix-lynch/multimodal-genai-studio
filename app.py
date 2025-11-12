@@ -432,11 +432,11 @@ def create_interface():
                                 label="Model",
                                 value=tts.get_available_models()[0] if tts.get_available_models() else None
                             )
-                            tts_voice = gr.Dropdown(
-                                choices=tts.get_available_voices("tts-1"),
-                                label="Voice",
-                                value="alloy"
-                            )
+                        tts_voice = gr.Dropdown(
+                            choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+                            label="Voice",
+                            value="alloy"
+                        )
                         
                         with gr.Row():
                             tts_language = gr.Textbox(
@@ -501,7 +501,7 @@ def create_interface():
                                     )
                                 
                                 story_tts_voice = gr.Dropdown(
-                                    choices=tts.get_available_voices("tts-1"),
+                                    choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
                                     label="Voice",
                                     value="nova"
                                 )
