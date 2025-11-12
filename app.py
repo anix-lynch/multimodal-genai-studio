@@ -602,8 +602,8 @@ if __name__ == "__main__":
     # Create and launch app
     app = create_interface()
     app.launch(
-        server_name=ServerConfig.HOST,
-        server_port=ServerConfig.PORT,
-        share=ServerConfig.SHARE
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False
     )
 
