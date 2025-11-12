@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  multimodal-genai-studio:
+    build: ..
+    container_name: multimodal-genai-studio
+    ports:
+      - "7861:7861"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - ../outputs:/app/outputs
+      - ../uploads:/app/uploads
+      - ../cache:/app/cache
+      - ../logs:/app/logs
+    restart: unless-stopped
+
