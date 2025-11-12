@@ -5,7 +5,12 @@ Simplified version for Streamlit Cloud deployment
 
 import streamlit as st
 import os
-from datetime import datetime
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 
 # Set page config
 st.set_page_config(
@@ -16,19 +21,27 @@ st.set_page_config(
 
 # Load secrets (works with both local and cloud)
 try:
-    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
 except:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+# Set environment variable
+if GOOGLE_API_KEY:
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 # Initialize generators
 @st.cache_resource
 def init_generators():
-    from src.text.generator import TextGenerator
-    from src.audio.synthesizer import TextToSpeech
-    
-    text_gen = TextGenerator()
-    tts = TextToSpeech()
-    return text_gen, tts
+    try:
+        from src.text.generator import TextGenerator
+        from src.audio.synthesizer import TextToSpeech
+        
+        text_gen = TextGenerator()
+        tts = TextToSpeech()
+        return text_gen, tts
+    except Exception as e:
+        st.error(f"Import error: {e}")
+        return None, None
 
 # Header
 st.markdown("# 🎨 Multimodal GenAI Studio")
@@ -38,10 +51,10 @@ if not GOOGLE_API_KEY:
     st.error("⚠️ No API key configured. Add GOOGLE_API_KEY in Streamlit Cloud secrets.")
     st.stop()
 
-try:
-    text_gen, tts = init_generators()
-except Exception as e:
-    st.error(f"Initialization error: {e}")
+text_gen, tts = init_generators()
+
+if text_gen is None or tts is None:
+    st.error("Failed to initialize generators. Check logs.")
     st.stop()
 
 # Tabs
