@@ -491,45 +491,79 @@ with tab3:
                             else:
                                 st.error(f"OpenAI TTS failed: {str(e)[:50]}...")
 
-                    # Try free TTS service as fallback
+                    # Try free TTS service as fallback (ElevenLabs-like free service)
                     if not success:
                         try:
                             import requests
-                            import base64
 
-                            # Use a free TTS API (TTSMP3)
-                            tts_url = "https://ttsmp3.com/makemp3_new.php"
+                            # Use a simple free TTS service
+                            # Let's try a different free TTS API
+                            tts_url = "https://api.streamelements.com/kappa/v2/speech"
 
-                            # Map voices to TTSMP3 voices
-                            voice_map = {
-                                "alloy": "Matthew",
-                                "echo": "Joanna",
-                                "fable": "Matthew",
-                                "onyx": "Joanna"
-                            }
-
-                            selected_voice = voice_map.get(tts_voice, "Matthew")
+                            # Clean the text and limit length
+                            clean_text = tts_text[:250].strip()
+                            if not clean_text:
+                                clean_text = "Hello world"
 
                             payload = {
-                                "msg": tts_text[:300],  # Limit text for free service
-                                "lang": "Matthew",  # Default voice
-                                "source": "ttsmp3"
+                                "voice": "Brian",
+                                "text": clean_text
                             }
 
-                            response = requests.get(tts_url, params=payload, timeout=15)
+                            response = requests.post(tts_url, json=payload, timeout=15)
 
                             if response.status_code == 200:
-                                data = response.json()
-                                if data.get("URL"):
+                                # StreamElements returns audio directly
+                                audio_content = response.content
+                                if len(audio_content) > 1000:  # Check if we got actual audio
                                     st.success("✅ Generated with Free TTS!")
-                                    st.audio(data["URL"], format="audio/mp3")
+                                    st.audio(audio_content, format="audio/ogg")
                                     success = True
                                 else:
-                                    st.warning("TTSMP3 returned no audio URL")
+                                    st.warning("TTS returned invalid audio")
+                            else:
+                                st.warning(f"Free TTS returned status {response.status_code}")
+                        except Exception as e:
+                            st.warning(f"Free TTS failed: {str(e)[:50]}...")
+
+                    # Try another free TTS service as last resort
+                    if not success:
+                        try:
+                            import requests
+
+                            # Use TTSMP3 with correct parameters
+                            tts_url = "https://ttsmp3.com/makemp3.php"
+
+                            # TTSMP3 expects different parameters
+                            payload = {
+                                "msg": tts_text[:200],  # Shorter limit
+                                "lang": "US English",  # Language
+                                "speed": "0",  # Normal speed
+                                "voice": "1"   # Default voice
+                            }
+
+                            response = requests.post(tts_url, data=payload, timeout=15)
+
+                            if response.status_code == 200:
+                                # TTSMP3 returns HTML with audio URL
+                                response_text = response.text
+                                if "Download:" in response_text:
+                                    # Extract the audio URL from HTML response
+                                    import re
+                                    url_match = re.search(r'href="([^"]*\.mp3)"', response_text)
+                                    if url_match:
+                                        audio_url = "https://ttsmp3.com" + url_match.group(1)
+                                        st.success("✅ Generated with TTSMP3!")
+                                        st.audio(audio_url, format="audio/mp3")
+                                        success = True
+                                    else:
+                                        st.warning("Could not extract audio URL from TTSMP3")
+                                else:
+                                    st.warning("TTSMP3 did not return audio URL")
                             else:
                                 st.warning(f"TTSMP3 returned status {response.status_code}")
                         except Exception as e:
-                            st.warning(f"Free TTS failed: {str(e)[:50]}...")
+                            st.warning(f"TTSMP3 failed: {str(e)[:50]}...")
 
                     if not success:
                         st.error("❌ All text-to-speech services failed.")
@@ -706,25 +740,46 @@ with tab4:
                                     if "billing_hard_limit" in str(e):
                                         st.warning("OpenAI billing limit reached for audio")
 
-                            # Try free TTS service as fallback
+                            # Try free TTS services as fallback
                             if not success_audio:
                                 try:
                                     import requests
 
-                                    tts_url = "https://ttsmp3.com/makemp3_new.php"
+                                    # Try StreamElements TTS first
+                                    tts_url = "https://api.streamelements.com/kappa/v2/speech"
+                                    clean_text = story_text[:250].strip() or "Hello world"
+
                                     payload = {
-                                        "msg": story_text[:300],  # Limit for free service
-                                        "lang": "Matthew",
-                                        "source": "ttsmp3"
+                                        "voice": "Brian",
+                                        "text": clean_text
                                     }
 
-                                    response = requests.get(tts_url, params=payload, timeout=15)
-                                    if response.status_code == 200:
-                                        data = response.json()
-                                        if data.get("URL"):
-                                            st.markdown("### 🔊 Audio Version (Free TTS):")
-                                            st.audio(data["URL"], format="audio/mp3")
-                                            success_audio = True
+                                    response = requests.post(tts_url, json=payload, timeout=15)
+                                    if response.status_code == 200 and len(response.content) > 1000:
+                                        st.markdown("### 🔊 Audio Version (Free TTS):")
+                                        st.audio(response.content, format="audio/ogg")
+                                        success_audio = True
+                                    else:
+                                        # Try TTSMP3 as backup
+                                        tts_url2 = "https://ttsmp3.com/makemp3.php"
+                                        payload2 = {
+                                            "msg": story_text[:200],
+                                            "lang": "US English",
+                                            "speed": "0",
+                                            "voice": "1"
+                                        }
+
+                                        response2 = requests.post(tts_url2, data=payload2, timeout=15)
+                                        if response2.status_code == 200:
+                                            response_text = response2.text
+                                            if "Download:" in response_text:
+                                                import re
+                                                url_match = re.search(r'href="([^"]*\.mp3)"', response_text)
+                                                if url_match:
+                                                    audio_url = "https://ttsmp3.com" + url_match.group(1)
+                                                    st.markdown("### 🔊 Audio Version (TTSMP3):")
+                                                    st.audio(audio_url, format="audio/mp3")
+                                                    success_audio = True
                                 except Exception as e:
                                     st.warning(f"Free TTS failed: {str(e)[:50]}...")
 
