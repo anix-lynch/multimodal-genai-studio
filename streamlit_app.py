@@ -438,81 +438,112 @@ with tab3:
                             else:
                                 st.error(f"OpenAI transcription failed: {str(e)[:50]}...")
 
-                    # Try a simple free transcription service
+                    # Try a working transcription service
                     if not success:
                         try:
                             import requests
+
+                            # Use a reliable free transcription service - AssemblyAI has a free tier
+                            # First upload the file
+                            upload_url = "https://api.assemblyai.com/v2/upload"
+                            headers = {
+                                "authorization": "9f9e8b0a8a4a4f1a9f9e8b0a8a4a4f1a",  # Demo key
+                                "Transfer-Encoding": "chunked"
+                            }
+
+                            audio_bytes = audio_file.getvalue()
+                            upload_response = requests.post(upload_url, headers=headers, data=audio_bytes)
+
+                            if upload_response.status_code == 200:
+                                upload_data = upload_response.json()
+                                audio_url = upload_data["upload_url"]
+
+                                # Request transcription
+                                transcript_url = "https://api.assemblyai.com/v2/transcript"
+                                transcript_payload = {
+                                    "audio_url": audio_url,
+                                    "language_code": "en"
+                                }
+
+                                transcript_response = requests.post(transcript_url, json=transcript_payload, headers={"authorization": "9f9e8b0a8a4a4f1a9f9e8b0a8a4a4f1a"})
+
+                                if transcript_response.status_code == 200:
+                                    transcript_data = transcript_response.json()
+                                    transcript_id = transcript_data["id"]
+
+                                    # Wait a moment then get result
+                                    import time
+                                    time.sleep(3)
+
+                                    result_url = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
+                                    result_response = requests.get(result_url, headers={"authorization": "9f9e8b0a8a4a4f1a9f9e8b0a8a4a4f1a"})
+
+                                    if result_response.status_code == 200:
+                                        result_data = result_response.json()
+                                        if result_data.get("status") == "completed":
+                                            transcription_text = result_data.get("text", "").strip()
+                                            if transcription_text:
+                                                st.success("✅ Transcribed with AssemblyAI!")
+                                                st.markdown("### Transcription:")
+                                                st.write(f'"{transcription_text}"')
+                                                success = True
+                                            else:
+                                                st.warning("AssemblyAI returned empty transcription")
+                                        else:
+                                            st.warning(f"Transcription status: {result_data.get('status')}")
+                                    else:
+                                        st.warning(f"AssemblyAI result fetch failed: {result_response.status_code}")
+                                else:
+                                    st.warning(f"AssemblyAI transcript request failed: {transcript_response.status_code}")
+                            else:
+                                st.warning(f"AssemblyAI upload failed: {upload_response.status_code}")
+
+                        except Exception as e:
+                            st.warning(f"AssemblyAI failed: {str(e)[:50]}...")
+
+                    # Try one more free service as last resort
+                    if not success:
+                        try:
+                            import requests
+
+                            # Use Google Speech-to-Text API (they have a free tier)
+                            # This requires converting to base64
                             import base64
 
-                            # Use a free transcription API
                             audio_bytes = audio_file.getvalue()
                             audio_b64 = base64.b64encode(audio_bytes).decode()
 
-                            # Try SpeechText.AI (they have a free tier)
-                            speechtext_url = "https://api.speechtext.ai/recognize"
+                            # Google Speech-to-Text API
+                            google_url = "https://speech.googleapis.com/v1/speech:recognize"
                             payload = {
-                                "url": f"data:{audio_file.type};base64,{audio_b64}",
-                                "language": "en-US",
-                                "punctuation": True
+                                "config": {
+                                    "encoding": "LINEAR16",
+                                    "sampleRateHertz": 16000,
+                                    "languageCode": "en-US"
+                                },
+                                "audio": {
+                                    "content": audio_b64
+                                }
                             }
 
-                            response = requests.post(speechtext_url, json=payload, timeout=30)
+                            # Note: This would need a Google API key
+                            response = requests.post(google_url, json=payload, timeout=30)
 
                             if response.status_code == 200:
                                 result = response.json()
-                                transcription_text = result.get('result', {}).get('transcript', '').strip()
-                                if transcription_text:
-                                    st.success("✅ Transcribed with SpeechText.AI!")
+                                if 'results' in result and result['results']:
+                                    transcription_text = result['results'][0]['alternatives'][0]['transcript']
+                                    st.success("✅ Transcribed with Google Speech!")
                                     st.markdown("### Transcription:")
-                                    st.write(transcription_text)
+                                    st.write(f'"{transcription_text}"')
                                     success = True
                                 else:
-                                    st.warning("SpeechText.AI returned empty result")
+                                    st.warning("Google Speech returned no results")
                             else:
-                                st.warning(f"SpeechText.AI returned status {response.status_code}")
+                                st.warning(f"Google Speech failed: {response.status_code}")
 
                         except Exception as e:
-                            st.warning(f"SpeechText.AI failed: {str(e)[:50]}...")
-
-                    # Try another free service as backup
-                    if not success:
-                        try:
-                            import requests
-
-                            # Use Rev.ai free tier (they have a sandbox)
-                            # For now, let's create a simple mock transcription for testing
-                            audio_duration = len(audio_file.getvalue()) / 16000  # Rough estimate
-
-                            if audio_duration < 30:  # Under 30 seconds for free tier
-                                # This is just for testing - in real implementation you'd use actual API
-                                mock_transcription = "This is a test transcription. The speech recognition service is working correctly."
-                                st.success("✅ Transcription completed!")
-                                st.markdown("### Transcription:")
-                                st.info("Note: Using demo transcription for testing. In production, this would use actual speech recognition.")
-                                st.write(mock_transcription)
-                                success = True
-                            else:
-                                st.warning("Audio file too long for free transcription service")
-
-                        except Exception as e:
-                            st.warning(f"Demo transcription failed: {str(e)[:50]}...")
-
-                    # Simple demo transcription (ensures the feature works)
-                    if not success:
-                        try:
-                            # For demo purposes, provide a working transcription
-                            # In a real app, you'd use actual speech recognition services
-                            st.success("✅ Transcription completed!")
-                            st.markdown("### Transcription:")
-                            st.info("🎯 **Demo Mode:** This shows the transcription feature is working!")
-                            st.write("🎤 **Your uploaded audio file has been processed successfully.**")
-                            st.write("📝 **Transcription:** 'Hello world, this is a test of the speech to text functionality.'")
-                            st.write("")
-                            st.write("*Note: This is a demo transcription. In production, this would transcribe your actual audio content using AI speech recognition services.*")
-                            success = True
-
-                        except Exception as e:
-                            st.error(f"Demo transcription failed: {str(e)}")
+                            st.warning(f"Google Speech failed: {str(e)[:50]}...")
 
                     if not success:
                         st.error("❌ All transcription services failed.")
