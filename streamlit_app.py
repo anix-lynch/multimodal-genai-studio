@@ -63,9 +63,36 @@ def get_openai_client():
     except ImportError:
         return None
 
+def get_openrouter_client():
+    """Get OpenRouter API client (alternative to OpenAI)"""
+    try:
+        from openai import OpenAI
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if api_key:
+            return OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
+        return None
+    except ImportError:
+        return None
+
+def get_anthropic_client():
+    """Get Anthropic Claude client"""
+    try:
+        import anthropic
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if api_key:
+            return anthropic.Anthropic(api_key=api_key)
+        return None
+    except ImportError:
+        return None
+
 # Initialize clients
 gemini_model, gemini_model_name = get_gemini_client()
 openai_client = get_openai_client()
+openrouter_client = get_openrouter_client()
+anthropic_client = get_anthropic_client()
 
 # Header
 st.title("🎨 Multimodal GenAI Studio")
@@ -76,36 +103,47 @@ st.markdown("**🎓 IBM Coursera Certification:** Build Multimodal Generative AI
 with st.sidebar:
     st.header("🔑 API Status")
 
-    # Check API availability and show debug info
+    # Check API availability
     gemini_available = gemini_model is not None
     openai_available = openai_client is not None
+    openrouter_available = openrouter_client is not None
+    anthropic_available = anthropic_client is not None
 
+    # Show status with recommendations
     if gemini_available and gemini_model_name:
-        st.write(f"**Gemini ({gemini_model_name}):** ⚠️ (Free tier - quota limits)")
+        st.write(f"**Gemini ({gemini_model_name}):** ⚠️ (Free tier - quotas)")
     else:
         st.write("**Gemini:** ❌")
-    st.write(f"**OpenAI:** {'✅' if openai_available else '❌'} (Recommended - no quotas)")
+
+    st.write(f"**OpenAI:** {'❌ Quota exceeded' if not openai_available else '✅'}")
+    st.write(f"**OpenRouter:** {'✅ Recommended' if openrouter_available else '❌'}")
+    st.write(f"**Claude (Anthropic):** {'✅ Alternative' if anthropic_available else '❌'}")
 
     # Debug info
     if st.checkbox("Show debug info"):
         st.write("**Debug Info:**")
-        gemini_key = bool(os.getenv("GEMINI_API_KEY", ""))
-        openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
-        st.write(f"Gemini key present: {'✅' if gemini_key else '❌'}")
-        st.write(f"OpenAI key present: {'✅' if openai_key else '❌'}")
+        keys = {
+            "Gemini": os.getenv("GEMINI_API_KEY", ""),
+            "OpenAI": os.getenv("OPENAI_API_KEY", ""),
+            "OpenRouter": os.getenv("OPENROUTER_API_KEY", ""),
+            "Anthropic": os.getenv("ANTHROPIC_API_KEY", "")
+        }
+        for name, key in keys.items():
+            st.write(f"{name} key: {'✅' if key else '❌'}")
+
         if gemini_model_name:
             st.write(f"Gemini model: {gemini_model_name}")
 
-        if gemini_available:
-            try:
-                # Test Gemini model
-                test_response = gemini_model.generate_content("Hello")
-                st.write("Gemini test: ✅ Working")
-            except Exception as e:
-                st.write(f"Gemini test: ❌ Error - {str(e)[:50]}...")
+    # Show working alternatives
+    working_apis = []
+    if openrouter_available: working_apis.append("OpenRouter")
+    if anthropic_available: working_apis.append("Claude")
+    if openai_available: working_apis.append("OpenAI")
 
-    if not any([gemini_available, openai_available]):
-        st.warning("⚠️ No API keys configured. Some features may not work.")
+    if working_apis:
+        st.success(f"✅ Working APIs: {', '.join(working_apis)}")
+    else:
+        st.error("❌ No working APIs - check your keys!")
 
 # Main tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Text Generation", "🖼️ Image Generation", "🎤 Audio Processing", "🎯 Multimodal", "ℹ️ About"])
@@ -122,16 +160,28 @@ with tab1:
             height=150
         )
 
-        # Build model options dynamically - prioritize OpenAI (more reliable)
-        model_options = ["gpt-4o-mini"]  # Always include OpenAI first
+        # Build model options dynamically - prioritize working APIs
+        model_options = []
+
+        # Add working APIs in priority order
+        if openrouter_available:
+            model_options.extend(["openrouter/gpt-4o-mini", "openrouter/claude-3-haiku", "openrouter/gemini-pro"])
+        if anthropic_available:
+            model_options.append("claude-3-haiku")
+        if openai_available:
+            model_options.append("gpt-4o-mini")
         if gemini_available and gemini_model_name:
             model_options.append(gemini_model_name)
+
+        # Ensure we have at least one option
+        if not model_options:
+            model_options = ["No models available"]
 
         model = st.selectbox(
             "Model:",
             model_options,
-            index=0,  # Default to OpenAI
-            help="OpenAI is recommended - more reliable and no quota limits for your usage"
+            index=0,
+            help="Multiple APIs available - OpenRouter recommended for reliability"
         )
 
         max_tokens = st.slider("Max tokens:", 100, 2000, 500)
@@ -144,8 +194,65 @@ with tab1:
         if prompt.strip():
             with st.spinner("🤖 Generating text..."):
                 try:
-                    if model == gemini_model_name and gemini_model:
-                        # Use Gemini
+                    result_text = None
+
+                    # Handle different API providers
+                    if model.startswith("openrouter/"):
+                        # OpenRouter API
+                        if openrouter_client:
+                            actual_model = model.replace("openrouter/", "")
+                            messages = []
+                            if system_prompt:
+                                messages.append({"role": "system", "content": system_prompt})
+                            messages.append({"role": "user", "content": prompt})
+
+                            response = openrouter_client.chat.completions.create(
+                                model=actual_model,
+                                messages=messages,
+                                max_tokens=max_tokens,
+                                temperature=temperature
+                            )
+                            result_text = response.choices[0].message.content
+                        else:
+                            st.error("❌ OpenRouter client not available")
+
+                    elif model == "claude-3-haiku" and anthropic_client:
+                        # Anthropic Claude
+                        system_msg = system_prompt if system_prompt else ""
+                        response = anthropic_client.messages.create(
+                            model="claude-3-haiku-20240307",
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            system=system_msg,
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        result_text = response.content[0].text
+
+                    elif model == "gpt-4o-mini" and openai_client:
+                        # OpenAI (if quota allows)
+                        try:
+                            messages = []
+                            if system_prompt:
+                                messages.append({"role": "system", "content": system_prompt})
+                            messages.append({"role": "user", "content": prompt})
+
+                            response = openai_client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=messages,
+                                max_tokens=max_tokens,
+                                temperature=temperature
+                            )
+                            result_text = response.choices[0].message.content
+                        except Exception as openai_error:
+                            if "insufficient_quota" in str(openai_error) or "429" in str(openai_error):
+                                st.error("❌ OpenAI Quota Exceeded")
+                                st.info("💡 **Try OpenRouter or Claude instead!**")
+                            else:
+                                st.error(f"❌ OpenAI Error: {str(openai_error)}")
+                            result_text = None
+
+                    elif model == gemini_model_name and gemini_model:
+                        # Gemini (last resort)
                         try:
                             full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
                             response = gemini_model.generate_content(full_prompt)
@@ -154,29 +261,13 @@ with tab1:
                             error_msg = str(gemini_error).lower()
                             if "quota" in error_msg or "429" in error_msg:
                                 st.error("❌ Gemini Free Tier Quota Exceeded")
-                                st.info("💡 **Switch to GPT-4o-mini** - OpenAI has no quota limits for your usage level!")
+                                st.info("💡 **Try OpenRouter or Claude instead!**")
                             else:
                                 st.error(f"❌ Gemini API Error: {str(gemini_error)}")
-                                st.info("💡 Try using GPT-4o-mini instead.")
                             result_text = None
 
-                    elif model == "gpt-4o-mini" and openai_client:
-                        # Use OpenAI
-                        messages = []
-                        if system_prompt:
-                            messages.append({"role": "system", "content": system_prompt})
-                        messages.append({"role": "user", "content": prompt})
-
-                        response = openai_client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=messages,
-                            max_tokens=max_tokens,
-                            temperature=temperature
-                        )
-                        result_text = response.choices[0].message.content
-
                     else:
-                        st.error(f"❌ {model} model not available. Check API keys.")
+                        st.error(f"❌ {model} model not available")
                         result_text = None
 
                     if result_text:
