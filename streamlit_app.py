@@ -318,56 +318,64 @@ with tab2:
                 try:
                     success = False
 
-                    # Try Stability AI via OpenRouter (they have good free tier)
-                    if openrouter_client and not success:
+                    # Try Pollinations.ai - FREE unlimited image generation
+                    if not success:
                         try:
-                            response = openrouter_client.images.generate(
-                                model="stability-ai/sdxl",
-                                prompt=image_prompt,
-                                size="1024x1024",
-                                n=1,
-                            )
-                            if hasattr(response, 'data') and response.data:
-                                image_url = response.data[0].url
-                                st.success("✅ Generated with Stability AI!")
-                                st.image(image_url, caption=image_prompt, use_container_width=True)
-                                success = True
-                        except Exception as e:
-                            st.warning(f"Stability AI failed: {str(e)[:50]}...")
+                            # Pollinations.ai is free and unlimited
+                            import requests
+                            import base64
 
-                    # Try another Stability AI model
-                    if openrouter_client and not success:
-                        try:
-                            response = openrouter_client.images.generate(
-                                model="stability-ai/sd3-medium",
-                                prompt=image_prompt,
-                                size="1024x1024",
-                                n=1,
-                            )
-                            if hasattr(response, 'data') and response.data:
-                                image_url = response.data[0].url
-                                st.success("✅ Generated with SD3!")
-                                st.image(image_url, caption=image_prompt, use_container_width=True)
-                                success = True
-                        except Exception as e:
-                            st.warning(f"SD3 failed: {str(e)[:50]}...")
+                            # Create the image URL directly (they have a simple API)
+                            encoded_prompt = requests.utils.quote(image_prompt)
+                            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&seed=42"
 
-                    # Try FLUX model
-                    if openrouter_client and not success:
-                        try:
-                            response = openrouter_client.images.generate(
-                                model="blackforestlabs/flux-1.1-pro",
-                                prompt=image_prompt,
-                                size="1024x1024",
-                                n=1,
-                            )
-                            if hasattr(response, 'data') and response.data:
-                                image_url = response.data[0].url
-                                st.success("✅ Generated with FLUX!")
+                            # Test if the URL works by trying to fetch it
+                            response = requests.get(image_url, timeout=10)
+                            if response.status_code == 200:
+                                st.success("✅ Generated with Pollinations.ai (FREE)!")
                                 st.image(image_url, caption=image_prompt, use_container_width=True)
                                 success = True
+                            else:
+                                st.warning(f"Pollinations.ai returned status {response.status_code}")
                         except Exception as e:
-                            st.warning(f"FLUX failed: {str(e)[:50]}...")
+                            st.warning(f"Pollinations.ai failed: {str(e)[:50]}...")
+
+                    # Try Hugging Face free inference API as backup
+                    if not success:
+                        try:
+                            import requests
+
+                            # Use a free HF model that works
+                            api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+                            headers = {
+                                "Authorization": f"Bearer {os.getenv('HF_TOKEN', '')}",
+                                "Content-Type": "application/json"
+                            }
+
+                            payload = {
+                                "inputs": image_prompt,
+                                "parameters": {
+                                    "width": 1024,
+                                    "height": 1024,
+                                    "num_inference_steps": 20
+                                }
+                            }
+
+                            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+
+                            if response.status_code == 200:
+                                # Convert the response to an image
+                                from PIL import Image
+                                import io
+
+                                image = Image.open(io.BytesIO(response.content))
+                                st.success("✅ Generated with Hugging Face!")
+                                st.image(image, caption=image_prompt, use_container_width=True)
+                                success = True
+                            else:
+                                st.warning(f"Hugging Face returned status {response.status_code}")
+                        except Exception as e:
+                            st.warning(f"Hugging Face failed: {str(e)[:50]}...")
 
                     # Try OpenAI as fallback (if quota allows)
                     if openai_client and not success:
@@ -583,35 +591,44 @@ with tab4:
                             except Exception as e:
                                 st.warning(f"Claude text failed: {str(e)[:50]}...")
 
-                        # Generate real image - try Stability AI first
-                        if openrouter_client:
+                        # Generate real image - try Pollinations.ai first (FREE unlimited)
+                        try:
+                            import requests
+                            encoded_prompt = requests.utils.quote(f"{multimodal_prompt}, highly detailed, professional image")
+                            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&seed=42"
+
+                            response = requests.get(image_url, timeout=10)
+                            if response.status_code == 200:
+                                st.markdown("### 🖼️ Generated Image (Pollinations.ai):")
+                                st.image(image_url, caption=multimodal_prompt, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Pollinations.ai failed: {str(e)[:50]}...")
+                            # Try Hugging Face as fallback
                             try:
-                                response = openrouter_client.images.generate(
-                                    model="stability-ai/sdxl",
-                                    prompt=f"{multimodal_prompt}, highly detailed, professional image",
-                                    size="1024x1024",
-                                    n=1,
-                                )
-                                if hasattr(response, 'data') and response.data:
-                                    image_url = response.data[0].url
-                                    st.markdown("### 🖼️ Generated Image (Stability AI):")
-                                    st.image(image_url, caption=multimodal_prompt, use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"Stability AI image failed: {str(e)[:50]}...")
-                                # Try FLUX as fallback
-                                try:
-                                    response = openrouter_client.images.generate(
-                                        model="blackforestlabs/flux-1.1-pro",
-                                        prompt=f"{multimodal_prompt}, highly detailed, professional image",
-                                        size="1024x1024",
-                                        n=1,
-                                    )
-                                    if hasattr(response, 'data') and response.data:
-                                        image_url = response.data[0].url
-                                        st.markdown("### 🖼️ Generated Image (FLUX):")
-                                        st.image(image_url, caption=multimodal_prompt, use_container_width=True)
-                                except Exception as e2:
-                                    st.warning(f"FLUX image failed: {str(e)[:50]}...")
+                                api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+                                headers = {
+                                    "Authorization": f"Bearer {os.getenv('HF_TOKEN', '')}",
+                                    "Content-Type": "application/json"
+                                }
+
+                                payload = {
+                                    "inputs": f"{multimodal_prompt}, highly detailed, professional image",
+                                    "parameters": {
+                                        "width": 1024,
+                                        "height": 1024,
+                                        "num_inference_steps": 20
+                                    }
+                                }
+
+                                response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+                                if response.status_code == 200:
+                                    from PIL import Image
+                                    import io
+                                    image = Image.open(io.BytesIO(response.content))
+                                    st.markdown("### 🖼️ Generated Image (Hugging Face):")
+                                    st.image(image, caption=multimodal_prompt, use_container_width=True)
+                            except Exception as e2:
+                                st.warning(f"Hugging Face failed: {str(e)[:50]}...")
 
                     elif content_type == "Text + Audio":
                         # Generate text - try multiple APIs
