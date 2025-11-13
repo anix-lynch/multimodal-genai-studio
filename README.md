@@ -3,9 +3,9 @@ title: Multimodal GenAI Studio
 emoji: 🎨
 colorFrom: blue
 colorTo: purple
-sdk: gradio
-sdk_version: 4.44.1
-app_file: app.py
+sdk: streamlit
+sdk_version: 1.28.0
+app_file: streamlit_app.py
 pinned: false
 ---
 
