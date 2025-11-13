@@ -36,6 +36,8 @@ cache/
 *.jpeg
 !data/examples/*.png
 !data/examples/*.jpg
+!multimodal-thumbnail.png
+!public/*.gif
 
 # Models
 models/
