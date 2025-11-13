@@ -15,6 +15,7 @@ pip-delete-this-directory.txt
 .env
 .env.local
 *.env
+.streamlit/secrets.toml
 
 # IDE
 .vscode/
