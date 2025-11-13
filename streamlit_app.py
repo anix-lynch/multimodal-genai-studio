@@ -469,32 +469,13 @@ with tab3:
                 try:
                     success = False
 
-                    # Try OpenRouter first (various TTS models)
-                    if openrouter_client and not success:
-                        try:
-                            response = openrouter_client.audio.speech.create(
-                                model="openai/tts-1",
-                                voice=tts_voice if tts_voice in ["alloy", "echo", "fable", "onyx"] else "alloy",
-                                input=tts_text[:4000]  # Limit text length
-                            )
-
-                            audio_bytes = b""
-                            for chunk in response.iter_bytes():
-                                audio_bytes += chunk
-
-                            st.success("✅ Generated with OpenRouter!")
-                            st.audio(audio_bytes, format="audio/mp3")
-                            success = True
-                        except Exception as e:
-                            st.warning(f"OpenRouter TTS failed: {str(e)[:50]}...")
-
-                    # Try OpenAI as fallback
+                    # Try OpenAI first (if quota allows)
                     if openai_client and not success:
                         try:
                             response = openai_client.audio.speech.create(
                                 model="tts-1",
-                                voice=tts_voice,
-                                input=tts_text
+                                voice=tts_voice if tts_voice in ["alloy", "echo", "fable", "onyx"] else "alloy",
+                                input=tts_text[:4000]  # Limit text length
                             )
 
                             audio_bytes = b""
@@ -506,9 +487,49 @@ with tab3:
                             success = True
                         except Exception as e:
                             if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
-                                st.warning("OpenAI billing limit reached - try OpenRouter above")
+                                st.warning("OpenAI billing limit reached")
                             else:
                                 st.error(f"OpenAI TTS failed: {str(e)[:50]}...")
+
+                    # Try free TTS service as fallback
+                    if not success:
+                        try:
+                            import requests
+                            import base64
+
+                            # Use a free TTS API (TTSMP3)
+                            tts_url = "https://ttsmp3.com/makemp3_new.php"
+
+                            # Map voices to TTSMP3 voices
+                            voice_map = {
+                                "alloy": "Matthew",
+                                "echo": "Joanna",
+                                "fable": "Matthew",
+                                "onyx": "Joanna"
+                            }
+
+                            selected_voice = voice_map.get(tts_voice, "Matthew")
+
+                            payload = {
+                                "msg": tts_text[:300],  # Limit text for free service
+                                "lang": "Matthew",  # Default voice
+                                "source": "ttsmp3"
+                            }
+
+                            response = requests.get(tts_url, params=payload, timeout=15)
+
+                            if response.status_code == 200:
+                                data = response.json()
+                                if data.get("URL"):
+                                    st.success("✅ Generated with Free TTS!")
+                                    st.audio(data["URL"], format="audio/mp3")
+                                    success = True
+                                else:
+                                    st.warning("TTSMP3 returned no audio URL")
+                            else:
+                                st.warning(f"TTSMP3 returned status {response.status_code}")
+                        except Exception as e:
+                            st.warning(f"Free TTS failed: {str(e)[:50]}...")
 
                     if not success:
                         st.error("❌ All text-to-speech services failed.")
@@ -664,38 +685,48 @@ with tab4:
                                 if "billing_hard_limit" in str(e):
                                     st.warning("OpenAI billing limit reached for text")
 
-                        # Generate audio - try OpenRouter first
+                        # Generate audio - try OpenAI first
                         if story_text:
-                            if openrouter_client:
+                            success_audio = False
+
+                            if openai_client and not success_audio:
                                 try:
-                                    audio_response = openrouter_client.audio.speech.create(
-                                        model="openai/tts-1",
+                                    audio_response = openai_client.audio.speech.create(
+                                        model="tts-1",
                                         voice="alloy",
                                         input=story_text[:1000]
                                     )
                                     audio_bytes = b""
                                     for chunk in audio_response.iter_bytes():
                                         audio_bytes += chunk
-                                    st.markdown("### 🔊 Audio Version (OpenRouter):")
+                                    st.markdown("### 🔊 Audio Version (OpenAI):")
                                     st.audio(audio_bytes, format="audio/mp3")
+                                    success_audio = True
                                 except Exception as e:
-                                    st.warning(f"OpenRouter audio failed: {str(e)[:50]}...")
-                                    # Try OpenAI as fallback
-                                    if openai_client:
-                                        try:
-                                            audio_response = openai_client.audio.speech.create(
-                                                model="tts-1",
-                                                voice="alloy",
-                                                input=story_text[:1000]
-                                            )
-                                            audio_bytes = b""
-                                            for chunk in audio_response.iter_bytes():
-                                                audio_bytes += chunk
-                                            st.markdown("### 🔊 Audio Version (OpenAI):")
-                                            st.audio(audio_bytes, format="audio/mp3")
-                                        except Exception as e2:
-                                            if "billing_hard_limit" in str(e2):
-                                                st.warning("OpenAI billing limit reached for audio")
+                                    if "billing_hard_limit" in str(e):
+                                        st.warning("OpenAI billing limit reached for audio")
+
+                            # Try free TTS service as fallback
+                            if not success_audio:
+                                try:
+                                    import requests
+
+                                    tts_url = "https://ttsmp3.com/makemp3_new.php"
+                                    payload = {
+                                        "msg": story_text[:300],  # Limit for free service
+                                        "lang": "Matthew",
+                                        "source": "ttsmp3"
+                                    }
+
+                                    response = requests.get(tts_url, params=payload, timeout=15)
+                                    if response.status_code == 200:
+                                        data = response.json()
+                                        if data.get("URL"):
+                                            st.markdown("### 🔊 Audio Version (Free TTS):")
+                                            st.audio(data["URL"], format="audio/mp3")
+                                            success_audio = True
+                                except Exception as e:
+                                    st.warning(f"Free TTS failed: {str(e)[:50]}...")
 
                     elif content_type == "Simple Combined Demo":
                         st.markdown("### 🎯 Combined Demo:")
