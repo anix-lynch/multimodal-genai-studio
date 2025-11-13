@@ -21,22 +21,36 @@ st.set_page_config(
 
 # Initialize API clients
 def get_gemini_client():
-    """Get Gemini API client"""
+    """Get Gemini API client and find working model"""
     try:
         import google.generativeai as genai
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             genai.configure(api_key=api_key)
-            # Try different model names
-            for model_name in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-1.0-pro']:
-                try:
-                    return genai.GenerativeModel(model_name)
-                except:
-                    continue
-            return None
-        return None
+
+            # List available models first
+            try:
+                models = genai.list_models()
+                text_models = [m for m in models if 'generateContent' in m.supported_generation_methods]
+
+                if text_models:
+                    # Use the first available text generation model
+                    model_name = text_models[0].name.split('/')[-1]  # Extract model name
+                    return genai.GenerativeModel(model_name), model_name
+                else:
+                    # Fallback to known working models
+                    for model_name in ['gemini-1.0-pro', 'gemini-pro']:
+                        try:
+                            return genai.GenerativeModel(model_name), model_name
+                        except:
+                            continue
+            except Exception as e:
+                st.error(f"Could not list models: {e}")
+
+            return None, None
+        return None, None
     except ImportError:
-        return None
+        return None, None
 
 def get_openai_client():
     """Get OpenAI API client"""
@@ -50,7 +64,7 @@ def get_openai_client():
         return None
 
 # Initialize clients
-gemini_model = get_gemini_client()
+gemini_model, gemini_model_name = get_gemini_client()
 openai_client = get_openai_client()
 
 # Header
@@ -66,7 +80,10 @@ with st.sidebar:
     gemini_available = gemini_model is not None
     openai_available = openai_client is not None
 
-    st.write(f"**Gemini:** {'✅' if gemini_available else '❌'}")
+    if gemini_available and gemini_model_name:
+        st.write(f"**Gemini ({gemini_model_name}):** ✅")
+    else:
+        st.write("**Gemini:** ❌")
     st.write(f"**OpenAI:** {'✅' if openai_available else '❌'}")
 
     # Debug info
@@ -76,6 +93,8 @@ with st.sidebar:
         openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
         st.write(f"Gemini key present: {'✅' if gemini_key else '❌'}")
         st.write(f"OpenAI key present: {'✅' if openai_key else '❌'}")
+        if gemini_model_name:
+            st.write(f"Gemini model: {gemini_model_name}")
 
         if gemini_available:
             try:
@@ -103,9 +122,15 @@ with tab1:
             height=150
         )
 
+        # Build model options dynamically
+        model_options = []
+        if gemini_available and gemini_model_name:
+            model_options.append(gemini_model_name)
+        model_options.append("gpt-4o-mini")
+
         model = st.selectbox(
             "Model:",
-            ["gemini-pro", "gpt-4o-mini"],
+            model_options,
             index=0
         )
 
@@ -119,7 +144,7 @@ with tab1:
         if prompt.strip():
             with st.spinner("🤖 Generating text..."):
                 try:
-                    if model.startswith("gemini") and gemini_model:
+                    if model == gemini_model_name and gemini_model:
                         # Use Gemini
                         try:
                             full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
@@ -344,7 +369,7 @@ with tab4:
 
                         # Show capabilities
                         st.markdown("**🤖 AI Capabilities Used:**")
-                        st.markdown("- **Text Generation:** Gemini Pro")
+                        st.markdown(f"- **Text Generation:** {gemini_model_name or 'Gemini'}")
                         st.markdown("- **Image Creation:** DALL-E 3")
                         st.markdown("- **Speech Synthesis:** OpenAI TTS")
 
