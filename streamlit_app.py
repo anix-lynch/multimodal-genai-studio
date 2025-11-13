@@ -198,16 +198,24 @@ with tab1:
 
                     # Handle different API providers
                     if model.startswith("openrouter/"):
-                        # OpenRouter API
+                        # OpenRouter API - use correct model names
                         if openrouter_client:
                             actual_model = model.replace("openrouter/", "")
+                            # Map to correct OpenRouter model names
+                            model_mapping = {
+                                "gpt-4o-mini": "openai/gpt-4o-mini",
+                                "claude-3-haiku": "anthropic/claude-3-haiku",
+                                "gemini-pro": "google/gemini-pro"
+                            }
+                            or_model = model_mapping.get(actual_model, actual_model)
+
                             messages = []
                             if system_prompt:
                                 messages.append({"role": "system", "content": system_prompt})
                             messages.append({"role": "user", "content": prompt})
 
                             response = openrouter_client.chat.completions.create(
-                                model=actual_model,
+                                model=or_model,
                                 messages=messages,
                                 max_tokens=max_tokens,
                                 temperature=temperature
@@ -310,23 +318,47 @@ with tab2:
                 try:
                     success = False
 
-                    # Try OpenRouter first (multiple image models)
+                    # Try Claude first for creative image descriptions (since it has no image generation limits)
+                    if anthropic_client and not success:
+                        try:
+                            response = anthropic_client.messages.create(
+                                model="claude-3-haiku-20240307",
+                                max_tokens=300,
+                                messages=[{
+                                    "role": "user",
+                                    "content": f"Create a highly detailed description of an image showing: {image_prompt}. Make it vivid and specific so someone could visualize it clearly."
+                                }]
+                            )
+                            description = response.content[0].text
+                            st.success("✅ Generated creative description with Claude!")
+                            st.markdown("### 🎨 AI Image Description:")
+                            st.write(f"**Prompt:** {image_prompt}")
+                            st.write(f"**Description:** {description}")
+                            st.info("💡 Image generation APIs have limits. This gives you a detailed description instead!")
+                            success = True
+                        except Exception as e:
+                            st.warning(f"Claude description failed: {str(e)[:50]}...")
+
+                    # Try OpenRouter text-based image description as fallback
                     if openrouter_client and not success:
                         try:
-                            # Use FLUX model via OpenRouter
-                            response = openrouter_client.images.generate(
-                                model="blackforestlabs/flux-1.1-pro",
-                                prompt=image_prompt,
-                                size=image_size if image_size in ["512x512", "1024x1024"] else "1024x1024",
-                                n=1,
+                            response = openrouter_client.chat.completions.create(
+                                model="openai/gpt-4o-mini",
+                                messages=[{
+                                    "role": "user",
+                                    "content": f"Create a highly detailed description of an image showing: {image_prompt}. Make it vivid and specific so someone could visualize it clearly."
+                                }],
+                                max_tokens=300
                             )
-                            if response.data:
-                                image_url = response.data[0].url
-                                st.success("✅ Generated with OpenRouter!")
-                                st.image(image_url, caption=image_prompt, use_container_width=True)
-                                success = True
+                            description = response.choices[0].message.content
+                            st.success("✅ Generated creative description with OpenRouter!")
+                            st.markdown("### 🎨 AI Image Description:")
+                            st.write(f"**Prompt:** {image_prompt}")
+                            st.write(f"**Description:** {description}")
+                            st.info("💡 Image generation APIs have limits. This gives you a detailed description instead!")
+                            success = True
                         except Exception as e:
-                            st.warning(f"OpenRouter failed: {str(e)[:50]}...")
+                            st.warning(f"OpenRouter description failed: {str(e)[:50]}...")
 
                     # Try OpenAI as fallback (if quota allows)
                     if openai_client and not success:
@@ -502,7 +534,7 @@ with tab4:
                         if openrouter_client and not text_generated:
                             try:
                                 text_response = openrouter_client.chat.completions.create(
-                                    model="openrouter/gpt-4o-mini",
+                                    model="openai/gpt-4o-mini",
                                     messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}],
                                     max_tokens=200
                                 )
@@ -542,36 +574,40 @@ with tab4:
                             except Exception as e:
                                 st.warning(f"Claude text failed: {str(e)[:50]}...")
 
-                        # Generate image - try OpenRouter first
-                        if openrouter_client:
+                        # Generate image description - try Claude first
+                        if anthropic_client:
                             try:
-                                image_response = openrouter_client.images.generate(
-                                    model="blackforestlabs/flux-1.1-pro",
-                                    prompt=multimodal_prompt,
-                                    size="1024x1024",
-                                    n=1,
+                                response = anthropic_client.messages.create(
+                                    model="claude-3-haiku-20240307",
+                                    max_tokens=300,
+                                    messages=[{
+                                        "role": "user",
+                                        "content": f"Create a highly detailed visual description of: {multimodal_prompt}. Describe colors, composition, style, lighting, and mood in vivid detail."
+                                    }]
                                 )
-                                image_url = image_response.data[0].url
-                                st.markdown("### 🖼️ Generated Image (OpenRouter):")
-                                st.image(image_url, caption=multimodal_prompt)
+                                image_desc = response.content[0].text
+                                st.markdown("### 🖼️ Visual Concept (Claude):")
+                                st.write(f"**Concept:** {multimodal_prompt}")
+                                st.write(f"**Visual Description:** {image_desc}")
                             except Exception as e:
-                                st.warning(f"OpenRouter image failed: {str(e)[:50]}...")
-                                # Try OpenAI as fallback
-                                if openai_client:
+                                st.warning(f"Claude image description failed: {str(e)[:50]}...")
+                                # Try OpenRouter as fallback
+                                if openrouter_client:
                                     try:
-                                        image_response = openai_client.images.generate(
-                                            model="dall-e-3",
-                                            prompt=multimodal_prompt,
-                                            size="1024x1024",
-                                            quality="standard",
-                                            n=1,
+                                        response = openrouter_client.chat.completions.create(
+                                            model="openai/gpt-4o-mini",
+                                            messages=[{
+                                                "role": "user",
+                                                "content": f"Create a highly detailed visual description of: {multimodal_prompt}. Describe colors, composition, style, lighting, and mood in vivid detail."
+                                            }],
+                                            max_tokens=300
                                         )
-                                        image_url = image_response.data[0].url
-                                        st.markdown("### 🖼️ Generated Image (OpenAI):")
-                                        st.image(image_url, caption=multimodal_prompt)
+                                        image_desc = response.choices[0].message.content
+                                        st.markdown("### 🖼️ Visual Concept (OpenRouter):")
+                                        st.write(f"**Concept:** {multimodal_prompt}")
+                                        st.write(f"**Visual Description:** {image_desc}")
                                     except Exception as e2:
-                                        if "billing_hard_limit" in str(e2):
-                                            st.warning("OpenAI billing limit reached for images")
+                                        st.warning(f"OpenRouter image description failed: {str(e)[:50]}...")
 
                     elif content_type == "Text + Audio":
                         # Generate text - try multiple APIs
@@ -581,7 +617,7 @@ with tab4:
                         if openrouter_client and not text_generated:
                             try:
                                 text_response = openrouter_client.chat.completions.create(
-                                    model="openrouter/gpt-4o-mini",
+                                    model="openai/gpt-4o-mini",
                                     messages=[{"role": "user", "content": f"Write a short story about: {multimodal_prompt}"}],
                                     max_tokens=300
                                 )
