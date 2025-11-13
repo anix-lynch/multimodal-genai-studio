@@ -27,7 +27,13 @@ def get_gemini_client():
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             genai.configure(api_key=api_key)
-            return genai.GenerativeModel('gemini-1.5-flash')
+            # Try different model names
+            for model_name in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'gemini-1.0-pro']:
+                try:
+                    return genai.GenerativeModel(model_name)
+                except:
+                    continue
+            return None
         return None
     except ImportError:
         return None
@@ -56,12 +62,28 @@ st.markdown("**🎓 IBM Coursera Certification:** Build Multimodal Generative AI
 with st.sidebar:
     st.header("🔑 API Status")
 
-    # Check API availability
+    # Check API availability and show debug info
     gemini_available = gemini_model is not None
     openai_available = openai_client is not None
 
     st.write(f"**Gemini:** {'✅' if gemini_available else '❌'}")
     st.write(f"**OpenAI:** {'✅' if openai_available else '❌'}")
+
+    # Debug info
+    if st.checkbox("Show debug info"):
+        st.write("**Debug Info:**")
+        gemini_key = bool(os.getenv("GEMINI_API_KEY", ""))
+        openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
+        st.write(f"Gemini key present: {'✅' if gemini_key else '❌'}")
+        st.write(f"OpenAI key present: {'✅' if openai_key else '❌'}")
+
+        if gemini_available:
+            try:
+                # Test Gemini model
+                test_response = gemini_model.generate_content("Hello")
+                st.write("Gemini test: ✅ Working")
+            except Exception as e:
+                st.write(f"Gemini test: ❌ Error - {str(e)[:50]}...")
 
     if not any([gemini_available, openai_available]):
         st.warning("⚠️ No API keys configured. Some features may not work.")
@@ -83,7 +105,7 @@ with tab1:
 
         model = st.selectbox(
             "Model:",
-            ["gemini-1.5-flash", "gpt-4o-mini"],
+            ["gemini-pro", "gpt-4o-mini"],
             index=0
         )
 
@@ -97,11 +119,16 @@ with tab1:
         if prompt.strip():
             with st.spinner("🤖 Generating text..."):
                 try:
-                    if model == "gemini-1.5-flash" and gemini_model:
+                    if model.startswith("gemini") and gemini_model:
                         # Use Gemini
-                        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-                        response = gemini_model.generate_content(full_prompt)
-                        result_text = response.text
+                        try:
+                            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+                            response = gemini_model.generate_content(full_prompt)
+                            result_text = response.text
+                        except Exception as gemini_error:
+                            st.error(f"❌ Gemini API Error: {str(gemini_error)}")
+                            st.info("💡 Try using GPT-4o-mini instead, or check your Gemini API key.")
+                            result_text = None
 
                     elif model == "gpt-4o-mini" and openai_client:
                         # Use OpenAI
@@ -317,7 +344,7 @@ with tab4:
 
                         # Show capabilities
                         st.markdown("**🤖 AI Capabilities Used:**")
-                        st.markdown("- **Text Generation:** Gemini 1.5 Flash")
+                        st.markdown("- **Text Generation:** Gemini Pro")
                         st.markdown("- **Image Creation:** DALL-E 3")
                         st.markdown("- **Speech Synthesis:** OpenAI TTS")
 
