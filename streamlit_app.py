@@ -7,17 +7,9 @@ Perfect for Streamlit Cloud deployment
 import streamlit as st
 import os
 import logging
-from pathlib import Path
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-# Import our modules
-from src.text.generator import TextGenerator
-from src.image.generator import ImageGenerator
-from src.audio.transcriber import AudioTranscriber
-from src.audio.synthesizer import TextToSpeech
-from src.multimodal.pipeline import MultimodalPipeline
+import requests
+from io import BytesIO
+import base64
 
 # Configure page
 st.set_page_config(
@@ -27,17 +19,33 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if 'text_gen' not in st.session_state:
-    st.session_state.text_gen = TextGenerator()
-if 'image_gen' not in st.session_state:
-    st.session_state.image_gen = ImageGenerator()
-if 'audio_trans' not in st.session_state:
-    st.session_state.audio_trans = AudioTranscriber()
-if 'tts' not in st.session_state:
-    st.session_state.tts = TextToSpeech()
-if 'pipeline' not in st.session_state:
-    st.session_state.pipeline = MultimodalPipeline()
+# Initialize API clients
+def get_gemini_client():
+    """Get Gemini API client"""
+    try:
+        import google.generativeai as genai
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            genai.configure(api_key=api_key)
+            return genai.GenerativeModel('gemini-1.5-flash')
+        return None
+    except ImportError:
+        return None
+
+def get_openai_client():
+    """Get OpenAI API client"""
+    try:
+        from openai import OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            return OpenAI(api_key=api_key)
+        return None
+    except ImportError:
+        return None
+
+# Initialize clients
+gemini_model = get_gemini_client()
+openai_client = get_openai_client()
 
 # Header
 st.title("🎨 Multimodal GenAI Studio")
@@ -48,16 +56,14 @@ st.markdown("**🎓 IBM Coursera Certification:** Build Multimodal Generative AI
 with st.sidebar:
     st.header("🔑 API Status")
 
-    # Check API keys
-    gemini_key = bool(os.getenv("GEMINI_API_KEY", ""))
-    openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
-    hf_token = bool(os.getenv("HF_TOKEN", ""))
+    # Check API availability
+    gemini_available = gemini_model is not None
+    openai_available = openai_client is not None
 
-    st.write(f"**Gemini:** {'✅' if gemini_key else '❌'}")
-    st.write(f"**OpenAI:** {'✅' if openai_key else '❌'}")
-    st.write(f"**HuggingFace:** {'✅' if hf_token else '❌'}")
+    st.write(f"**Gemini:** {'✅' if gemini_available else '❌'}")
+    st.write(f"**OpenAI:** {'✅' if openai_available else '❌'}")
 
-    if not any([gemini_key, openai_key, hf_token]):
+    if not any([gemini_available, openai_available]):
         st.warning("⚠️ No API keys configured. Some features may not work.")
 
 # Main tabs
@@ -77,7 +83,7 @@ with tab1:
 
         model = st.selectbox(
             "Model:",
-            ["gemini-1.5-flash", "gpt-4o-mini", "claude-3-haiku"],
+            ["gemini-1.5-flash", "gpt-4o-mini"],
             index=0
         )
 
@@ -91,17 +97,35 @@ with tab1:
         if prompt.strip():
             with st.spinner("🤖 Generating text..."):
                 try:
-                    result = st.session_state.text_gen.generate(
-                        prompt=prompt,
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        system_prompt=system_prompt if system_prompt else None
-                    )
+                    if model == "gemini-1.5-flash" and gemini_model:
+                        # Use Gemini
+                        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+                        response = gemini_model.generate_content(full_prompt)
+                        result_text = response.text
 
-                    st.success("✅ Generated!")
-                    st.markdown("### Result:")
-                    st.markdown(result['text'])
+                    elif model == "gpt-4o-mini" and openai_client:
+                        # Use OpenAI
+                        messages = []
+                        if system_prompt:
+                            messages.append({"role": "system", "content": system_prompt})
+                        messages.append({"role": "user", "content": prompt})
+
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature
+                        )
+                        result_text = response.choices[0].message.content
+
+                    else:
+                        st.error(f"❌ {model} model not available. Check API keys.")
+                        result_text = None
+
+                    if result_text:
+                        st.success("✅ Generated!")
+                        st.markdown("### Result:")
+                        st.markdown(result_text)
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -122,7 +146,7 @@ with tab2:
 
         image_model = st.selectbox(
             "Model:",
-            ["dall-e-3", "stable-diffusion-xl"],
+            ["dall-e-3", "dall-e-2"],
             index=0
         )
 
@@ -130,23 +154,26 @@ with tab2:
         if image_model == "dall-e-3":
             image_size = st.selectbox("Size:", ["1024x1024", "1792x1024", "1024x1792"])
         else:
-            image_size = st.selectbox("Size:", ["512x512", "1024x1024"])
+            image_size = st.selectbox("Size:", ["256x256", "512x512", "1024x1024"])
 
     if st.button("Generate Image", type="primary", use_container_width=True):
         if image_prompt.strip():
             with st.spinner("🎨 Generating image..."):
                 try:
-                    result = st.session_state.image_gen.generate(
-                        prompt=image_prompt,
-                        model=image_model,
-                        size=image_size
-                    )
+                    if openai_client:
+                        response = openai_client.images.generate(
+                            model=image_model,
+                            prompt=image_prompt,
+                            size=image_size,
+                            quality="standard",
+                            n=1,
+                        )
 
-                    st.success("✅ Generated!")
-                    if 'url' in result:
-                        st.image(result['url'], caption=image_prompt)
-                    elif 'image' in result:
-                        st.image(result['image'], caption=image_prompt)
+                        image_url = response.data[0].url
+                        st.success("✅ Generated!")
+                        st.image(image_url, caption=image_prompt, use_container_width=True)
+                    else:
+                        st.error("❌ OpenAI API key not available for image generation.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -159,43 +186,56 @@ with tab3:
     audio_tab1, audio_tab2 = st.tabs(["🎧 Transcription", "🔊 Text-to-Speech"])
 
     with audio_tab1:
-        st.subheader("Speech to Text")
+        st.subheader("Speech to Text (OpenAI Whisper)")
+        st.info("Upload an audio file (MP3, WAV, M4A) to transcribe it to text")
         audio_file = st.file_uploader("Upload audio file", type=['mp3', 'wav', 'm4a'])
 
-        if st.button("Transcribe Audio") and audio_file:
+        if st.button("Transcribe Audio", type="primary") and audio_file:
             with st.spinner("🎧 Transcribing..."):
                 try:
-                    # Save temp file
-                    with open(f"temp_audio.{audio_file.type.split('/')[-1]}", "wb") as f:
-                        f.write(audio_file.getbuffer())
+                    if openai_client:
+                        # Save uploaded file temporarily
+                        audio_bytes = audio_file.getvalue()
 
-                    result = st.session_state.audio_trans.transcribe(f"temp_audio.{audio_file.type.split('/')[-1]}")
+                        # Create transcription
+                        transcription = openai_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio." + audio_file.type.split('/')[-1], audio_bytes, audio_file.type)
+                        )
 
-                    st.success("✅ Transcribed!")
-                    st.markdown("### Transcription:")
-                    st.write(result['text'])
+                        st.success("✅ Transcribed!")
+                        st.markdown("### Transcription:")
+                        st.write(transcription.text)
+                    else:
+                        st.error("❌ OpenAI API key not available for transcription.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
 
     with audio_tab2:
-        st.subheader("Text to Speech")
-        tts_text = st.text_area("Enter text to convert to speech:", height=100)
-        tts_voice = st.selectbox("Voice:", ["alloy", "echo", "fable", "onyx"])
+        st.subheader("Text to Speech (OpenAI TTS)")
+        tts_text = st.text_area("Enter text to convert to speech:", height=100, placeholder="Hello, this is a sample text to speech conversion.")
+        tts_voice = st.selectbox("Voice:", ["alloy", "echo", "fable", "onyx"], index=0)
 
-        if st.button("Generate Speech") and tts_text.strip():
+        if st.button("Generate Speech", type="primary") and tts_text.strip():
             with st.spinner("🔊 Generating speech..."):
                 try:
-                    result = st.session_state.tts.synthesize(
-                        text=tts_text,
-                        voice=tts_voice
-                    )
+                    if openai_client:
+                        response = openai_client.audio.speech.create(
+                            model="tts-1",
+                            voice=tts_voice,
+                            input=tts_text
+                        )
 
-                    st.success("✅ Generated!")
-                    if 'audio_url' in result:
-                        st.audio(result['audio_url'])
-                    elif 'audio' in result:
-                        st.audio(result['audio'])
+                        # Convert to bytes for Streamlit audio player
+                        audio_bytes = b""
+                        for chunk in response.iter_bytes():
+                            audio_bytes += chunk
+
+                        st.success("✅ Generated!")
+                        st.audio(audio_bytes, format="audio/mp3")
+                    else:
+                        st.error("❌ OpenAI API key not available for text-to-speech.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -204,47 +244,82 @@ with tab4:
     st.header("🎯 Multimodal Pipeline")
 
     st.markdown("Combine multiple modalities for creative content generation.")
+    st.info("This demo shows how different AI models can work together.")
 
     col1, col2 = st.columns(2)
 
     with col1:
         multimodal_prompt = st.text_area(
             "Creative concept:",
-            placeholder="A story about a robot learning to paint...",
+            placeholder="A futuristic city with flying cars...",
             height=100
         )
 
     with col2:
         content_type = st.selectbox(
             "Output type:",
-            ["Story with image", "Blog post with audio", "Presentation slides"]
+            ["Text + Image", "Text + Audio", "Simple Combined Demo"]
         )
 
     if st.button("Create Multimodal Content", type="primary", use_container_width=True):
         if multimodal_prompt.strip():
             with st.spinner("🎨 Creating multimodal content..."):
                 try:
-                    result = st.session_state.pipeline.create_multimodal_content(
-                        prompt=multimodal_prompt,
-                        content_type=content_type
-                    )
-
                     st.success("✅ Created!")
 
-                    # Display results based on type
-                    if content_type == "Story with image":
-                        st.markdown("### 📖 Story:")
-                        st.write(result.get('story', ''))
-                        if 'image' in result:
-                            st.image(result['image'])
-                    elif content_type == "Blog post with audio":
-                        st.markdown("### 📝 Blog Post:")
-                        st.write(result.get('blog_post', ''))
-                        if 'audio' in result:
-                            st.audio(result['audio'])
-                    elif content_type == "Presentation slides":
-                        st.markdown("### 📊 Presentation:")
-                        st.write(result.get('slides', ''))
+                    if content_type == "Text + Image":
+                        # Generate text description
+                        if gemini_model:
+                            text_response = gemini_model.generate_content(f"Write a creative description for: {multimodal_prompt}")
+                            st.markdown("### 📝 Generated Description:")
+                            st.write(text_response.text)
+
+                        # Generate image
+                        if openai_client:
+                            image_response = openai_client.images.generate(
+                                model="dall-e-3",
+                                prompt=multimodal_prompt,
+                                size="1024x1024",
+                                quality="standard",
+                                n=1,
+                            )
+                            image_url = image_response.data[0].url
+                            st.markdown("### 🖼️ Generated Image:")
+                            st.image(image_url, caption=multimodal_prompt)
+
+                    elif content_type == "Text + Audio":
+                        # Generate text
+                        if gemini_model:
+                            text_response = gemini_model.generate_content(f"Write a short story about: {multimodal_prompt}")
+                            story_text = text_response.text
+                            st.markdown("### 📖 Generated Story:")
+                            st.write(story_text)
+
+                        # Generate audio
+                        if openai_client:
+                            audio_response = openai_client.audio.speech.create(
+                                model="tts-1",
+                                voice="alloy",
+                                input=story_text[:1000] if 'story_text' in locals() else multimodal_prompt
+                            )
+
+                            audio_bytes = b""
+                            for chunk in audio_response.iter_bytes():
+                                audio_bytes += chunk
+
+                            st.markdown("### 🔊 Audio Version:")
+                            st.audio(audio_bytes, format="audio/mp3")
+
+                    elif content_type == "Simple Combined Demo":
+                        st.markdown("### 🎯 Combined Demo:")
+                        st.write(f"**Concept:** {multimodal_prompt}")
+                        st.write("This demonstrates how text, image, and audio AI models can work together to create rich multimedia content.")
+
+                        # Show capabilities
+                        st.markdown("**🤖 AI Capabilities Used:**")
+                        st.markdown("- **Text Generation:** Gemini 1.5 Flash")
+                        st.markdown("- **Image Creation:** DALL-E 3")
+                        st.markdown("- **Speech Synthesis:** OpenAI TTS")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
