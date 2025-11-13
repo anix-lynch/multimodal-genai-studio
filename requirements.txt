@@ -17,6 +17,10 @@ gTTS>=2.4.0
 # Audio Processing
 pydub>=0.25.1
 
+# Machine Learning
+torch>=2.0.0
+transformers>=4.36.0
+
 # Utilities
 requests>=2.31.0
 
