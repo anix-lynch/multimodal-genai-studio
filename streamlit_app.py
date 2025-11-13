@@ -99,15 +99,12 @@ st.title("🎨 Multimodal GenAI Studio")
 st.markdown("Create and combine text, images, and audio using various AI models.")
 st.markdown("**🎓 IBM Coursera Certification:** Build Multimodal Generative AI Applications")
 
-# Show thumbnail/preview image (for Streamlit Cloud screenshot)
-thumbnail_path = "multimodal-thumbnail.png"
-gif_path = "public/multimodal.gif"
-
-# Show thumbnail first (for Streamlit Cloud daily screenshot)
-if os.path.exists(thumbnail_path):
-    st.image(thumbnail_path, caption="Multimodal GenAI Studio Preview", use_container_width=True)
-elif os.path.exists(gif_path):
-    st.image(gif_path, caption="Multimodal GenAI Studio in Action", use_container_width=True)
+# Show demo image from GitHub (avoids large binary files in repo)
+demo_image_url = "https://raw.githubusercontent.com/anix-lynch/multimodal-genai-studio/main/public/multimodal.gif"
+try:
+    st.image(demo_image_url, caption="Multimodal GenAI Studio in Action", use_container_width=True)
+except:
+    pass  # Skip if image fails to load
 
 # Sidebar for API status
 with st.sidebar:
