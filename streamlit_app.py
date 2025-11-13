@@ -99,6 +99,11 @@ st.title("🎨 Multimodal GenAI Studio")
 st.markdown("Create and combine text, images, and audio using various AI models.")
 st.markdown("**🎓 IBM Coursera Certification:** Build Multimodal Generative AI Applications")
 
+# Show demo GIF
+gif_path = "public/multimodal.gif"
+if os.path.exists(gif_path):
+    st.image(gif_path, caption="Multimodal GenAI Studio in Action", use_container_width=True)
+
 # Sidebar for API status
 with st.sidebar:
     st.header("🔑 API Status")

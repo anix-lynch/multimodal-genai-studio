@@ -11,6 +11,8 @@ pinned: false
 
 # 🎨 Multimodal GenAI Studio
 
+![Multimodal GenAI Studio Demo](public/multimodal.gif)
+
 Professional multimodal AI application supporting text, image, and audio generation.
 
 ## Features
