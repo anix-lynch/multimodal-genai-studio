@@ -308,20 +308,48 @@ with tab2:
         if image_prompt.strip():
             with st.spinner("🎨 Generating image..."):
                 try:
-                    if openai_client:
-                        response = openai_client.images.generate(
-                            model=image_model,
-                            prompt=image_prompt,
-                            size=image_size,
-                            quality="standard",
-                            n=1,
-                        )
+                    success = False
 
-                        image_url = response.data[0].url
-                        st.success("✅ Generated!")
-                        st.image(image_url, caption=image_prompt, use_container_width=True)
-                    else:
-                        st.error("❌ OpenAI API key not available for image generation.")
+                    # Try OpenRouter first (multiple image models)
+                    if openrouter_client and not success:
+                        try:
+                            # Use FLUX model via OpenRouter
+                            response = openrouter_client.images.generate(
+                                model="blackforestlabs/flux-1.1-pro",
+                                prompt=image_prompt,
+                                size=image_size if image_size in ["512x512", "1024x1024"] else "1024x1024",
+                                n=1,
+                            )
+                            if response.data:
+                                image_url = response.data[0].url
+                                st.success("✅ Generated with OpenRouter!")
+                                st.image(image_url, caption=image_prompt, use_container_width=True)
+                                success = True
+                        except Exception as e:
+                            st.warning(f"OpenRouter failed: {str(e)[:50]}...")
+
+                    # Try OpenAI as fallback (if quota allows)
+                    if openai_client and not success:
+                        try:
+                            response = openai_client.images.generate(
+                                model=image_model,
+                                prompt=image_prompt,
+                                size=image_size,
+                                quality="standard",
+                                n=1,
+                            )
+                            image_url = response.data[0].url
+                            st.success("✅ Generated with OpenAI!")
+                            st.image(image_url, caption=image_prompt, use_container_width=True)
+                            success = True
+                        except Exception as e:
+                            if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
+                                st.warning("OpenAI billing limit reached - try OpenRouter above")
+                            else:
+                                st.error(f"OpenAI failed: {str(e)[:50]}...")
+
+                    if not success:
+                        st.error("❌ All image generation services failed. Try different models or check API keys.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -341,21 +369,43 @@ with tab3:
         if st.button("Transcribe Audio", type="primary") and audio_file:
             with st.spinner("🎧 Transcribing..."):
                 try:
-                    if openai_client:
-                        # Save uploaded file temporarily
-                        audio_bytes = audio_file.getvalue()
+                    success = False
 
-                        # Create transcription
-                        transcription = openai_client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=("audio." + audio_file.type.split('/')[-1], audio_bytes, audio_file.type)
-                        )
+                    # Try OpenRouter first (various Whisper models)
+                    if openrouter_client and not success:
+                        try:
+                            audio_bytes = audio_file.getvalue()
+                            transcription = openrouter_client.audio.transcriptions.create(
+                                model="openai/whisper-large-v3",
+                                file=("audio." + audio_file.type.split('/')[-1], audio_bytes, audio_file.type)
+                            )
+                            st.success("✅ Transcribed with OpenRouter!")
+                            st.markdown("### Transcription:")
+                            st.write(transcription.text)
+                            success = True
+                        except Exception as e:
+                            st.warning(f"OpenRouter transcription failed: {str(e)[:50]}...")
 
-                        st.success("✅ Transcribed!")
-                        st.markdown("### Transcription:")
-                        st.write(transcription.text)
-                    else:
-                        st.error("❌ OpenAI API key not available for transcription.")
+                    # Try OpenAI as fallback
+                    if openai_client and not success:
+                        try:
+                            audio_bytes = audio_file.getvalue()
+                            transcription = openai_client.audio.transcriptions.create(
+                                model="whisper-1",
+                                file=("audio." + audio_file.type.split('/')[-1], audio_bytes, audio_file.type)
+                            )
+                            st.success("✅ Transcribed with OpenAI!")
+                            st.markdown("### Transcription:")
+                            st.write(transcription.text)
+                            success = True
+                        except Exception as e:
+                            if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
+                                st.warning("OpenAI billing limit reached - try OpenRouter above")
+                            else:
+                                st.error(f"OpenAI transcription failed: {str(e)[:50]}...")
+
+                    if not success:
+                        st.error("❌ All transcription services failed.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -368,22 +418,51 @@ with tab3:
         if st.button("Generate Speech", type="primary") and tts_text.strip():
             with st.spinner("🔊 Generating speech..."):
                 try:
-                    if openai_client:
-                        response = openai_client.audio.speech.create(
-                            model="tts-1",
-                            voice=tts_voice,
-                            input=tts_text
-                        )
+                    success = False
 
-                        # Convert to bytes for Streamlit audio player
-                        audio_bytes = b""
-                        for chunk in response.iter_bytes():
-                            audio_bytes += chunk
+                    # Try OpenRouter first (various TTS models)
+                    if openrouter_client and not success:
+                        try:
+                            response = openrouter_client.audio.speech.create(
+                                model="openai/tts-1",
+                                voice=tts_voice if tts_voice in ["alloy", "echo", "fable", "onyx"] else "alloy",
+                                input=tts_text[:4000]  # Limit text length
+                            )
 
-                        st.success("✅ Generated!")
-                        st.audio(audio_bytes, format="audio/mp3")
-                    else:
-                        st.error("❌ OpenAI API key not available for text-to-speech.")
+                            audio_bytes = b""
+                            for chunk in response.iter_bytes():
+                                audio_bytes += chunk
+
+                            st.success("✅ Generated with OpenRouter!")
+                            st.audio(audio_bytes, format="audio/mp3")
+                            success = True
+                        except Exception as e:
+                            st.warning(f"OpenRouter TTS failed: {str(e)[:50]}...")
+
+                    # Try OpenAI as fallback
+                    if openai_client and not success:
+                        try:
+                            response = openai_client.audio.speech.create(
+                                model="tts-1",
+                                voice=tts_voice,
+                                input=tts_text
+                            )
+
+                            audio_bytes = b""
+                            for chunk in response.iter_bytes():
+                                audio_bytes += chunk
+
+                            st.success("✅ Generated with OpenAI!")
+                            st.audio(audio_bytes, format="audio/mp3")
+                            success = True
+                        except Exception as e:
+                            if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
+                                st.warning("OpenAI billing limit reached - try OpenRouter above")
+                            else:
+                                st.error(f"OpenAI TTS failed: {str(e)[:50]}...")
+
+                    if not success:
+                        st.error("❌ All text-to-speech services failed.")
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -416,73 +495,150 @@ with tab4:
                     st.success("✅ Created!")
 
                     if content_type == "Text + Image":
-                        # Generate text description - prefer OpenAI for reliability
-                        if openai_client:
-                            text_response = openai_client.chat.completions.create(
-                                model="gpt-4o-mini",
-                                messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}],
-                                max_tokens=200
-                            )
-                            st.markdown("### 📝 Generated Description:")
-                            st.write(text_response.choices[0].message.content)
-                        elif gemini_model:
-                            try:
-                                text_response = gemini_model.generate_content(f"Write a creative description for: {multimodal_prompt}")
-                                st.markdown("### 📝 Generated Description:")
-                                st.write(text_response.text)
-                            except Exception as e:
-                                if "quota" in str(e).lower():
-                                    st.error("❌ Gemini quota exceeded. Use OpenAI for text generation.")
+                        # Generate text description - try multiple APIs
+                        text_generated = False
+                        description_text = ""
 
-                        # Generate image
-                        if openai_client:
-                            image_response = openai_client.images.generate(
-                                model="dall-e-3",
-                                prompt=multimodal_prompt,
-                                size="1024x1024",
-                                quality="standard",
-                                n=1,
-                            )
-                            image_url = image_response.data[0].url
-                            st.markdown("### 🖼️ Generated Image:")
-                            st.image(image_url, caption=multimodal_prompt)
+                        if openrouter_client and not text_generated:
+                            try:
+                                text_response = openrouter_client.chat.completions.create(
+                                    model="openrouter/gpt-4o-mini",
+                                    messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}],
+                                    max_tokens=200
+                                )
+                                description_text = text_response.choices[0].message.content
+                                st.markdown("### 📝 Generated Description (OpenRouter):")
+                                st.write(description_text)
+                                text_generated = True
+                            except Exception as e:
+                                st.warning(f"OpenRouter text failed: {str(e)[:50]}...")
+
+                        if openai_client and not text_generated:
+                            try:
+                                text_response = openai_client.chat.completions.create(
+                                    model="gpt-4o-mini",
+                                    messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}],
+                                    max_tokens=200
+                                )
+                                description_text = text_response.choices[0].message.content
+                                st.markdown("### 📝 Generated Description (OpenAI):")
+                                st.write(description_text)
+                                text_generated = True
+                            except Exception as e:
+                                if "billing_hard_limit" in str(e):
+                                    st.warning("OpenAI billing limit reached for text")
+
+                        if anthropic_client and not text_generated:
+                            try:
+                                response = anthropic_client.messages.create(
+                                    model="claude-3-haiku-20240307",
+                                    max_tokens=200,
+                                    messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}]
+                                )
+                                description_text = response.content[0].text
+                                st.markdown("### 📝 Generated Description (Claude):")
+                                st.write(description_text)
+                                text_generated = True
+                            except Exception as e:
+                                st.warning(f"Claude text failed: {str(e)[:50]}...")
+
+                        # Generate image - try OpenRouter first
+                        if openrouter_client:
+                            try:
+                                image_response = openrouter_client.images.generate(
+                                    model="blackforestlabs/flux-1.1-pro",
+                                    prompt=multimodal_prompt,
+                                    size="1024x1024",
+                                    n=1,
+                                )
+                                image_url = image_response.data[0].url
+                                st.markdown("### 🖼️ Generated Image (OpenRouter):")
+                                st.image(image_url, caption=multimodal_prompt)
+                            except Exception as e:
+                                st.warning(f"OpenRouter image failed: {str(e)[:50]}...")
+                                # Try OpenAI as fallback
+                                if openai_client:
+                                    try:
+                                        image_response = openai_client.images.generate(
+                                            model="dall-e-3",
+                                            prompt=multimodal_prompt,
+                                            size="1024x1024",
+                                            quality="standard",
+                                            n=1,
+                                        )
+                                        image_url = image_response.data[0].url
+                                        st.markdown("### 🖼️ Generated Image (OpenAI):")
+                                        st.image(image_url, caption=multimodal_prompt)
+                                    except Exception as e2:
+                                        if "billing_hard_limit" in str(e2):
+                                            st.warning("OpenAI billing limit reached for images")
 
                     elif content_type == "Text + Audio":
-                        # Generate text - prefer OpenAI
+                        # Generate text - try multiple APIs
                         story_text = ""
-                        if openai_client:
-                            text_response = openai_client.chat.completions.create(
-                                model="gpt-4o-mini",
-                                messages=[{"role": "user", "content": f"Write a short story about: {multimodal_prompt}"}],
-                                max_tokens=300
-                            )
-                            story_text = text_response.choices[0].message.content
-                            st.markdown("### 📖 Generated Story:")
-                            st.write(story_text)
-                        elif gemini_model:
+                        text_generated = False
+
+                        if openrouter_client and not text_generated:
                             try:
-                                text_response = gemini_model.generate_content(f"Write a short story about: {multimodal_prompt}")
-                                story_text = text_response.text
-                                st.markdown("### 📖 Generated Story:")
+                                text_response = openrouter_client.chat.completions.create(
+                                    model="openrouter/gpt-4o-mini",
+                                    messages=[{"role": "user", "content": f"Write a short story about: {multimodal_prompt}"}],
+                                    max_tokens=300
+                                )
+                                story_text = text_response.choices[0].message.content
+                                st.markdown("### 📖 Generated Story (OpenRouter):")
                                 st.write(story_text)
+                                text_generated = True
                             except Exception as e:
-                                if "quota" in str(e).lower():
-                                    st.error("❌ Gemini quota exceeded. Use OpenAI for text generation.")
+                                st.warning(f"OpenRouter story failed: {str(e)[:50]}...")
 
-                        # Generate audio
-                        if openai_client and story_text:
-                            audio_response = openai_client.audio.speech.create(
-                                model="tts-1",
-                                voice="alloy",
-                                input=story_text[:1000] if 'story_text' in locals() else multimodal_prompt
-                            )
+                        if openai_client and not text_generated:
+                            try:
+                                text_response = openai_client.chat.completions.create(
+                                    model="gpt-4o-mini",
+                                    messages=[{"role": "user", "content": f"Write a short story about: {multimodal_prompt}"}],
+                                    max_tokens=300
+                                )
+                                story_text = text_response.choices[0].message.content
+                                st.markdown("### 📖 Generated Story (OpenAI):")
+                                st.write(story_text)
+                                text_generated = True
+                            except Exception as e:
+                                if "billing_hard_limit" in str(e):
+                                    st.warning("OpenAI billing limit reached for text")
 
-                            audio_bytes = b""
-                            for chunk in audio_response.iter_bytes():
-                                audio_bytes += chunk
-
-                            st.markdown("### 🔊 Audio Version:")
-                            st.audio(audio_bytes, format="audio/mp3")
+                        # Generate audio - try OpenRouter first
+                        if story_text:
+                            if openrouter_client:
+                                try:
+                                    audio_response = openrouter_client.audio.speech.create(
+                                        model="openai/tts-1",
+                                        voice="alloy",
+                                        input=story_text[:1000]
+                                    )
+                                    audio_bytes = b""
+                                    for chunk in audio_response.iter_bytes():
+                                        audio_bytes += chunk
+                                    st.markdown("### 🔊 Audio Version (OpenRouter):")
+                                    st.audio(audio_bytes, format="audio/mp3")
+                                except Exception as e:
+                                    st.warning(f"OpenRouter audio failed: {str(e)[:50]}...")
+                                    # Try OpenAI as fallback
+                                    if openai_client:
+                                        try:
+                                            audio_response = openai_client.audio.speech.create(
+                                                model="tts-1",
+                                                voice="alloy",
+                                                input=story_text[:1000]
+                                            )
+                                            audio_bytes = b""
+                                            for chunk in audio_response.iter_bytes():
+                                                audio_bytes += chunk
+                                            st.markdown("### 🔊 Audio Version (OpenAI):")
+                                            st.audio(audio_bytes, format="audio/mp3")
+                                        except Exception as e2:
+                                            if "billing_hard_limit" in str(e2):
+                                                st.warning("OpenAI billing limit reached for audio")
 
                     elif content_type == "Simple Combined Demo":
                         st.markdown("### 🎯 Combined Demo:")
