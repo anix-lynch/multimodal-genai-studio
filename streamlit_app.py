@@ -81,10 +81,10 @@ with st.sidebar:
     openai_available = openai_client is not None
 
     if gemini_available and gemini_model_name:
-        st.write(f"**Gemini ({gemini_model_name}):** ✅")
+        st.write(f"**Gemini ({gemini_model_name}):** ⚠️ (Free tier - quota limits)")
     else:
         st.write("**Gemini:** ❌")
-    st.write(f"**OpenAI:** {'✅' if openai_available else '❌'}")
+    st.write(f"**OpenAI:** {'✅' if openai_available else '❌'} (Recommended - no quotas)")
 
     # Debug info
     if st.checkbox("Show debug info"):
@@ -122,16 +122,16 @@ with tab1:
             height=150
         )
 
-        # Build model options dynamically
-        model_options = []
+        # Build model options dynamically - prioritize OpenAI (more reliable)
+        model_options = ["gpt-4o-mini"]  # Always include OpenAI first
         if gemini_available and gemini_model_name:
             model_options.append(gemini_model_name)
-        model_options.append("gpt-4o-mini")
 
         model = st.selectbox(
             "Model:",
             model_options,
-            index=0
+            index=0,  # Default to OpenAI
+            help="OpenAI is recommended - more reliable and no quota limits for your usage"
         )
 
         max_tokens = st.slider("Max tokens:", 100, 2000, 500)
@@ -151,8 +151,13 @@ with tab1:
                             response = gemini_model.generate_content(full_prompt)
                             result_text = response.text
                         except Exception as gemini_error:
-                            st.error(f"❌ Gemini API Error: {str(gemini_error)}")
-                            st.info("💡 Try using GPT-4o-mini instead, or check your Gemini API key.")
+                            error_msg = str(gemini_error).lower()
+                            if "quota" in error_msg or "429" in error_msg:
+                                st.error("❌ Gemini Free Tier Quota Exceeded")
+                                st.info("💡 **Switch to GPT-4o-mini** - OpenAI has no quota limits for your usage level!")
+                            else:
+                                st.error(f"❌ Gemini API Error: {str(gemini_error)}")
+                                st.info("💡 Try using GPT-4o-mini instead.")
                             result_text = None
 
                     elif model == "gpt-4o-mini" and openai_client:
@@ -320,11 +325,23 @@ with tab4:
                     st.success("✅ Created!")
 
                     if content_type == "Text + Image":
-                        # Generate text description
-                        if gemini_model:
-                            text_response = gemini_model.generate_content(f"Write a creative description for: {multimodal_prompt}")
+                        # Generate text description - prefer OpenAI for reliability
+                        if openai_client:
+                            text_response = openai_client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[{"role": "user", "content": f"Write a creative description for: {multimodal_prompt}"}],
+                                max_tokens=200
+                            )
                             st.markdown("### 📝 Generated Description:")
-                            st.write(text_response.text)
+                            st.write(text_response.choices[0].message.content)
+                        elif gemini_model:
+                            try:
+                                text_response = gemini_model.generate_content(f"Write a creative description for: {multimodal_prompt}")
+                                st.markdown("### 📝 Generated Description:")
+                                st.write(text_response.text)
+                            except Exception as e:
+                                if "quota" in str(e).lower():
+                                    st.error("❌ Gemini quota exceeded. Use OpenAI for text generation.")
 
                         # Generate image
                         if openai_client:
@@ -340,15 +357,29 @@ with tab4:
                             st.image(image_url, caption=multimodal_prompt)
 
                     elif content_type == "Text + Audio":
-                        # Generate text
-                        if gemini_model:
-                            text_response = gemini_model.generate_content(f"Write a short story about: {multimodal_prompt}")
-                            story_text = text_response.text
+                        # Generate text - prefer OpenAI
+                        story_text = ""
+                        if openai_client:
+                            text_response = openai_client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[{"role": "user", "content": f"Write a short story about: {multimodal_prompt}"}],
+                                max_tokens=300
+                            )
+                            story_text = text_response.choices[0].message.content
                             st.markdown("### 📖 Generated Story:")
                             st.write(story_text)
+                        elif gemini_model:
+                            try:
+                                text_response = gemini_model.generate_content(f"Write a short story about: {multimodal_prompt}")
+                                story_text = text_response.text
+                                st.markdown("### 📖 Generated Story:")
+                                st.write(story_text)
+                            except Exception as e:
+                                if "quota" in str(e).lower():
+                                    st.error("❌ Gemini quota exceeded. Use OpenAI for text generation.")
 
                         # Generate audio
-                        if openai_client:
+                        if openai_client and story_text:
                             audio_response = openai_client.audio.speech.create(
                                 model="tts-1",
                                 voice="alloy",
