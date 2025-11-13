@@ -420,22 +420,7 @@ with tab3:
                 try:
                     success = False
 
-                    # Try OpenRouter first (various Whisper models)
-                    if openrouter_client and not success:
-                        try:
-                            audio_bytes = audio_file.getvalue()
-                            transcription = openrouter_client.audio.transcriptions.create(
-                                model="openai/whisper-large-v3",
-                                file=("audio." + audio_file.type.split('/')[-1], audio_bytes, audio_file.type)
-                            )
-                            st.success("✅ Transcribed with OpenRouter!")
-                            st.markdown("### Transcription:")
-                            st.write(transcription.text)
-                            success = True
-                        except Exception as e:
-                            st.warning(f"OpenRouter transcription failed: {str(e)[:50]}...")
-
-                    # Try OpenAI as fallback
+                    # Try OpenAI first (most reliable)
                     if openai_client and not success:
                         try:
                             audio_bytes = audio_file.getvalue()
@@ -449,9 +434,110 @@ with tab3:
                             success = True
                         except Exception as e:
                             if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
-                                st.warning("OpenAI billing limit reached - try OpenRouter above")
+                                st.warning("OpenAI billing limit reached for transcription")
                             else:
                                 st.error(f"OpenAI transcription failed: {str(e)[:50]}...")
+
+                    # Try Hugging Face free inference API as fallback
+                    if not success:
+                        try:
+                            import requests
+                            from pydub import AudioSegment
+                            import io
+
+                            # Convert audio to WAV if needed
+                            audio_bytes = audio_file.getvalue()
+                            audio_format = audio_file.type.split('/')[-1]
+
+                            # Convert to WAV for Hugging Face
+                            if audio_format != 'wav':
+                                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes), format=audio_format)
+                                wav_buffer = io.BytesIO()
+                                audio_segment.export(wav_buffer, format='wav')
+                                audio_bytes = wav_buffer.getvalue()
+
+                            # Use Hugging Face free Whisper model
+                            api_url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
+                            headers = {
+                                "Authorization": f"Bearer {os.getenv('HF_TOKEN', '')}",
+                                "Content-Type": "audio/wav"
+                            }
+
+                            response = requests.post(api_url, headers=headers, data=audio_bytes, timeout=30)
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                transcription_text = result.get('text', '').strip()
+                                if transcription_text:
+                                    st.success("✅ Transcribed with Hugging Face!")
+                                    st.markdown("### Transcription:")
+                                    st.write(transcription_text)
+                                    success = True
+                                else:
+                                    st.warning("Hugging Face returned empty transcription")
+                            else:
+                                st.warning(f"Hugging Face returned status {response.status_code}")
+
+                        except Exception as e:
+                            st.warning(f"Hugging Face transcription failed: {str(e)[:50]}...")
+
+                    # Try a free web-based transcription service as last resort
+                    if not success:
+                        try:
+                            import requests
+
+                            # Use AssemblyAI free tier (they have a free plan)
+                            assembly_key = os.getenv('ASSEMBLY_API_KEY', '')
+                            if assembly_key:
+                                # Upload file first
+                                upload_url = "https://api.assemblyai.com/v2/upload"
+                                headers = {"authorization": assembly_key}
+
+                                audio_bytes = audio_file.getvalue()
+                                upload_response = requests.post(upload_url, headers=headers, data=audio_bytes)
+
+                                if upload_response.status_code == 200:
+                                    upload_data = upload_response.json()
+                                    audio_url = upload_data["upload_url"]
+
+                                    # Request transcription
+                                    transcript_url = "https://api.assemblyai.com/v2/transcript"
+                                    transcript_payload = {"audio_url": audio_url}
+
+                                    transcript_response = requests.post(transcript_url, json=transcript_payload, headers=headers)
+
+                                    if transcript_response.status_code == 200:
+                                        transcript_data = transcript_response.json()
+                                        transcript_id = transcript_data["id"]
+
+                                        # Poll for completion
+                                        polling_url = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
+                                        while True:
+                                            polling_response = requests.get(polling_url, headers=headers)
+                                            if polling_response.status_code == 200:
+                                                polling_data = polling_response.json()
+                                                if polling_data["status"] == "completed":
+                                                    transcription_text = polling_data.get("text", "").strip()
+                                                    if transcription_text:
+                                                        st.success("✅ Transcribed with AssemblyAI!")
+                                                        st.markdown("### Transcription:")
+                                                        st.write(transcription_text)
+                                                        success = True
+                                                    break
+                                                elif polling_data["status"] == "error":
+                                                    st.warning("AssemblyAI transcription error")
+                                                    break
+                                            import time
+                                            time.sleep(2)
+                                    else:
+                                        st.warning("AssemblyAI transcription request failed")
+                                else:
+                                    st.warning("AssemblyAI file upload failed")
+                            else:
+                                st.warning("No AssemblyAI API key available")
+
+                        except Exception as e:
+                            st.warning(f"AssemblyAI failed: {str(e)[:50]}...")
 
                     if not success:
                         st.error("❌ All transcription services failed.")
