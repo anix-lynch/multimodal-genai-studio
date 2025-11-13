@@ -11,9 +11,9 @@ pinned: false
 
 # 🎨 Multimodal GenAI Studio
 
-![Multimodal GenAI Studio](multimodal-thumbnail.png)
+![Multimodal GenAI Studio Demo](https://raw.githubusercontent.com/anix-lynch/multimodal-genai-studio/main/public/multimodal.gif)
 
-![Full Demo GIF](public/multimodal.gif)
+![Thumbnail](multimodal-thumbnail.png)
 
 Professional multimodal AI application supporting text, image, and audio generation.
 
