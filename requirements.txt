@@ -11,6 +11,9 @@ anthropic>=0.7.0
 # Image Processing
 Pillow>=10.1.0
 
+# Text-to-Speech
+gTTS>=2.4.0
+
 # Utilities
 requests>=2.31.0
 

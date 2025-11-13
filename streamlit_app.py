@@ -491,79 +491,62 @@ with tab3:
                             else:
                                 st.error(f"OpenAI TTS failed: {str(e)[:50]}...")
 
-                    # Try free TTS service as fallback (ElevenLabs-like free service)
+                    # Try gTTS (Google Text-to-Speech) - already in requirements
                     if not success:
                         try:
-                            import requests
+                            from gtts import gTTS
+                            import io
 
-                            # Use a simple free TTS service
-                            # Let's try a different free TTS API
-                            tts_url = "https://api.streamelements.com/kappa/v2/speech"
-
-                            # Clean the text and limit length
-                            clean_text = tts_text[:250].strip()
+                            # Use gTTS which is reliable and free
+                            clean_text = tts_text[:200].strip()  # Limit text length
                             if not clean_text:
                                 clean_text = "Hello world"
 
-                            payload = {
-                                "voice": "Brian",
-                                "text": clean_text
-                            }
+                            # Create TTS audio
+                            tts = gTTS(text=clean_text, lang='en', slow=False)
 
-                            response = requests.post(tts_url, json=payload, timeout=15)
+                            # Save to BytesIO for Streamlit
+                            audio_buffer = io.BytesIO()
+                            tts.write_to_fp(audio_buffer)
+                            audio_buffer.seek(0)
 
-                            if response.status_code == 200:
-                                # StreamElements returns audio directly
-                                audio_content = response.content
-                                if len(audio_content) > 1000:  # Check if we got actual audio
-                                    st.success("✅ Generated with Free TTS!")
-                                    st.audio(audio_content, format="audio/ogg")
-                                    success = True
-                                else:
-                                    st.warning("TTS returned invalid audio")
+                            audio_bytes = audio_buffer.getvalue()
+                            if len(audio_bytes) > 1000:  # Check if we got actual audio
+                                st.success("✅ Generated with Google TTS!")
+                                st.audio(audio_bytes, format="audio/mp3")
+                                success = True
                             else:
-                                st.warning(f"Free TTS returned status {response.status_code}")
+                                st.warning("gTTS returned invalid audio")
                         except Exception as e:
-                            st.warning(f"Free TTS failed: {str(e)[:50]}...")
+                            st.warning(f"gTTS failed: {str(e)[:50]}...")
 
-                    # Try another free TTS service as last resort
+                    # Try a simple web-based TTS as backup
                     if not success:
                         try:
                             import requests
 
-                            # Use TTSMP3 with correct parameters
-                            tts_url = "https://ttsmp3.com/makemp3.php"
+                            # Use VoiceRSS - reliable free TTS service
+                            tts_url = "http://api.voicerss.org/"
 
-                            # TTSMP3 expects different parameters
                             payload = {
-                                "msg": tts_text[:200],  # Shorter limit
-                                "lang": "US English",  # Language
-                                "speed": "0",  # Normal speed
-                                "voice": "1"   # Default voice
+                                "key": "demo",  # Demo key for basic usage
+                                "src": tts_text[:200],  # Text to speak
+                                "hl": "en-us",  # Language
+                                "r": "0",  # Speed
+                                "c": "mp3",  # Format
+                                "f": "16khz_16bit_stereo"  # Quality
                             }
 
-                            response = requests.post(tts_url, data=payload, timeout=15)
+                            response = requests.get(tts_url, params=payload, timeout=15)
 
-                            if response.status_code == 200:
-                                # TTSMP3 returns HTML with audio URL
-                                response_text = response.text
-                                if "Download:" in response_text:
-                                    # Extract the audio URL from HTML response
-                                    import re
-                                    url_match = re.search(r'href="([^"]*\.mp3)"', response_text)
-                                    if url_match:
-                                        audio_url = "https://ttsmp3.com" + url_match.group(1)
-                                        st.success("✅ Generated with TTSMP3!")
-                                        st.audio(audio_url, format="audio/mp3")
-                                        success = True
-                                    else:
-                                        st.warning("Could not extract audio URL from TTSMP3")
-                                else:
-                                    st.warning("TTSMP3 did not return audio URL")
+                            if response.status_code == 200 and len(response.content) > 1000:
+                                st.success("✅ Generated with VoiceRSS!")
+                                st.audio(response.content, format="audio/mp3")
+                                success = True
                             else:
-                                st.warning(f"TTSMP3 returned status {response.status_code}")
+                                st.warning(f"VoiceRSS failed: status {response.status_code}")
                         except Exception as e:
-                            st.warning(f"TTSMP3 failed: {str(e)[:50]}...")
+                            st.warning(f"VoiceRSS failed: {str(e)[:50]}...")
 
                     if not success:
                         st.error("❌ All text-to-speech services failed.")
@@ -740,48 +723,49 @@ with tab4:
                                     if "billing_hard_limit" in str(e):
                                         st.warning("OpenAI billing limit reached for audio")
 
-                            # Try free TTS services as fallback
+                            # Try gTTS as fallback for multimodal
+                            if not success_audio:
+                                try:
+                                    from gtts import gTTS
+                                    import io
+
+                                    clean_text = story_text[:200].strip() or "Hello world"
+                                    tts = gTTS(text=clean_text, lang='en', slow=False)
+
+                                    audio_buffer = io.BytesIO()
+                                    tts.write_to_fp(audio_buffer)
+                                    audio_buffer.seek(0)
+
+                                    audio_bytes = audio_buffer.getvalue()
+                                    if len(audio_bytes) > 1000:
+                                        st.markdown("### 🔊 Audio Version (Google TTS):")
+                                        st.audio(audio_bytes, format="audio/mp3")
+                                        success_audio = True
+                                except Exception as e:
+                                    st.warning(f"gTTS failed: {str(e)[:50]}...")
+
+                            # Try VoiceRSS as last resort
                             if not success_audio:
                                 try:
                                     import requests
 
-                                    # Try StreamElements TTS first
-                                    tts_url = "https://api.streamelements.com/kappa/v2/speech"
-                                    clean_text = story_text[:250].strip() or "Hello world"
-
+                                    tts_url = "http://api.voicerss.org/"
                                     payload = {
-                                        "voice": "Brian",
-                                        "text": clean_text
+                                        "key": "demo",
+                                        "src": story_text[:200],
+                                        "hl": "en-us",
+                                        "r": "0",
+                                        "c": "mp3",
+                                        "f": "16khz_16bit_stereo"
                                     }
 
-                                    response = requests.post(tts_url, json=payload, timeout=15)
+                                    response = requests.get(tts_url, params=payload, timeout=15)
                                     if response.status_code == 200 and len(response.content) > 1000:
-                                        st.markdown("### 🔊 Audio Version (Free TTS):")
-                                        st.audio(response.content, format="audio/ogg")
+                                        st.markdown("### 🔊 Audio Version (VoiceRSS):")
+                                        st.audio(response.content, format="audio/mp3")
                                         success_audio = True
-                                    else:
-                                        # Try TTSMP3 as backup
-                                        tts_url2 = "https://ttsmp3.com/makemp3.php"
-                                        payload2 = {
-                                            "msg": story_text[:200],
-                                            "lang": "US English",
-                                            "speed": "0",
-                                            "voice": "1"
-                                        }
-
-                                        response2 = requests.post(tts_url2, data=payload2, timeout=15)
-                                        if response2.status_code == 200:
-                                            response_text = response2.text
-                                            if "Download:" in response_text:
-                                                import re
-                                                url_match = re.search(r'href="([^"]*\.mp3)"', response_text)
-                                                if url_match:
-                                                    audio_url = "https://ttsmp3.com" + url_match.group(1)
-                                                    st.markdown("### 🔊 Audio Version (TTSMP3):")
-                                                    st.audio(audio_url, format="audio/mp3")
-                                                    success_audio = True
                                 except Exception as e:
-                                    st.warning(f"Free TTS failed: {str(e)[:50]}...")
+                                    st.warning(f"VoiceRSS failed: {str(e)[:50]}...")
 
                     elif content_type == "Simple Combined Demo":
                         st.markdown("### 🎯 Combined Demo:")
