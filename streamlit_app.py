@@ -318,47 +318,56 @@ with tab2:
                 try:
                     success = False
 
-                    # Try Claude first for creative image descriptions (since it has no image generation limits)
-                    if anthropic_client and not success:
-                        try:
-                            response = anthropic_client.messages.create(
-                                model="claude-3-haiku-20240307",
-                                max_tokens=300,
-                                messages=[{
-                                    "role": "user",
-                                    "content": f"Create a highly detailed description of an image showing: {image_prompt}. Make it vivid and specific so someone could visualize it clearly."
-                                }]
-                            )
-                            description = response.content[0].text
-                            st.success("✅ Generated creative description with Claude!")
-                            st.markdown("### 🎨 AI Image Description:")
-                            st.write(f"**Prompt:** {image_prompt}")
-                            st.write(f"**Description:** {description}")
-                            st.info("💡 Image generation APIs have limits. This gives you a detailed description instead!")
-                            success = True
-                        except Exception as e:
-                            st.warning(f"Claude description failed: {str(e)[:50]}...")
-
-                    # Try OpenRouter text-based image description as fallback
+                    # Try Stability AI via OpenRouter (they have good free tier)
                     if openrouter_client and not success:
                         try:
-                            response = openrouter_client.chat.completions.create(
-                                model="openai/gpt-4o-mini",
-                                messages=[{
-                                    "role": "user",
-                                    "content": f"Create a highly detailed description of an image showing: {image_prompt}. Make it vivid and specific so someone could visualize it clearly."
-                                }],
-                                max_tokens=300
+                            response = openrouter_client.images.generate(
+                                model="stability-ai/sdxl",
+                                prompt=image_prompt,
+                                size="1024x1024",
+                                n=1,
                             )
-                            description = response.choices[0].message.content
-                            st.success("✅ Generated creative description with OpenRouter!")
-                            st.markdown("### 🎨 AI Image Description:")
-                            st.write(f"**Prompt:** {image_prompt}")
-                            st.write(f"**Description:** {description}")
-                            st.info("💡 Image generation APIs have limits. This gives you a detailed description instead!")
-                            success = True
+                            if hasattr(response, 'data') and response.data:
+                                image_url = response.data[0].url
+                                st.success("✅ Generated with Stability AI!")
+                                st.image(image_url, caption=image_prompt, use_container_width=True)
+                                success = True
                         except Exception as e:
-                            st.warning(f"OpenRouter description failed: {str(e)[:50]}...")
+                            st.warning(f"Stability AI failed: {str(e)[:50]}...")
+
+                    # Try another Stability AI model
+                    if openrouter_client and not success:
+                        try:
+                            response = openrouter_client.images.generate(
+                                model="stability-ai/sd3-medium",
+                                prompt=image_prompt,
+                                size="1024x1024",
+                                n=1,
+                            )
+                            if hasattr(response, 'data') and response.data:
+                                image_url = response.data[0].url
+                                st.success("✅ Generated with SD3!")
+                                st.image(image_url, caption=image_prompt, use_container_width=True)
+                                success = True
+                        except Exception as e:
+                            st.warning(f"SD3 failed: {str(e)[:50]}...")
+
+                    # Try FLUX model
+                    if openrouter_client and not success:
+                        try:
+                            response = openrouter_client.images.generate(
+                                model="blackforestlabs/flux-1.1-pro",
+                                prompt=image_prompt,
+                                size="1024x1024",
+                                n=1,
+                            )
+                            if hasattr(response, 'data') and response.data:
+                                image_url = response.data[0].url
+                                st.success("✅ Generated with FLUX!")
+                                st.image(image_url, caption=image_prompt, use_container_width=True)
+                                success = True
+                        except Exception as e:
+                            st.warning(f"FLUX failed: {str(e)[:50]}...")
 
                     # Try OpenAI as fallback (if quota allows)
                     if openai_client and not success:
@@ -574,40 +583,35 @@ with tab4:
                             except Exception as e:
                                 st.warning(f"Claude text failed: {str(e)[:50]}...")
 
-                        # Generate image description - try Claude first
-                        if anthropic_client:
+                        # Generate real image - try Stability AI first
+                        if openrouter_client:
                             try:
-                                response = anthropic_client.messages.create(
-                                    model="claude-3-haiku-20240307",
-                                    max_tokens=300,
-                                    messages=[{
-                                        "role": "user",
-                                        "content": f"Create a highly detailed visual description of: {multimodal_prompt}. Describe colors, composition, style, lighting, and mood in vivid detail."
-                                    }]
+                                response = openrouter_client.images.generate(
+                                    model="stability-ai/sdxl",
+                                    prompt=f"{multimodal_prompt}, highly detailed, professional image",
+                                    size="1024x1024",
+                                    n=1,
                                 )
-                                image_desc = response.content[0].text
-                                st.markdown("### 🖼️ Visual Concept (Claude):")
-                                st.write(f"**Concept:** {multimodal_prompt}")
-                                st.write(f"**Visual Description:** {image_desc}")
+                                if hasattr(response, 'data') and response.data:
+                                    image_url = response.data[0].url
+                                    st.markdown("### 🖼️ Generated Image (Stability AI):")
+                                    st.image(image_url, caption=multimodal_prompt, use_container_width=True)
                             except Exception as e:
-                                st.warning(f"Claude image description failed: {str(e)[:50]}...")
-                                # Try OpenRouter as fallback
-                                if openrouter_client:
-                                    try:
-                                        response = openrouter_client.chat.completions.create(
-                                            model="openai/gpt-4o-mini",
-                                            messages=[{
-                                                "role": "user",
-                                                "content": f"Create a highly detailed visual description of: {multimodal_prompt}. Describe colors, composition, style, lighting, and mood in vivid detail."
-                                            }],
-                                            max_tokens=300
-                                        )
-                                        image_desc = response.choices[0].message.content
-                                        st.markdown("### 🖼️ Visual Concept (OpenRouter):")
-                                        st.write(f"**Concept:** {multimodal_prompt}")
-                                        st.write(f"**Visual Description:** {image_desc}")
-                                    except Exception as e2:
-                                        st.warning(f"OpenRouter image description failed: {str(e)[:50]}...")
+                                st.warning(f"Stability AI image failed: {str(e)[:50]}...")
+                                # Try FLUX as fallback
+                                try:
+                                    response = openrouter_client.images.generate(
+                                        model="blackforestlabs/flux-1.1-pro",
+                                        prompt=f"{multimodal_prompt}, highly detailed, professional image",
+                                        size="1024x1024",
+                                        n=1,
+                                    )
+                                    if hasattr(response, 'data') and response.data:
+                                        image_url = response.data[0].url
+                                        st.markdown("### 🖼️ Generated Image (FLUX):")
+                                        st.image(image_url, caption=multimodal_prompt, use_container_width=True)
+                                except Exception as e2:
+                                    st.warning(f"FLUX image failed: {str(e)[:50]}...")
 
                     elif content_type == "Text + Audio":
                         # Generate text - try multiple APIs
