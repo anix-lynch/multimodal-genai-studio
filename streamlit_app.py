@@ -433,10 +433,13 @@ with tab3:
                             st.write(transcription.text)
                             success = True
                         except Exception as e:
-                            if "billing_hard_limit" in str(e) or "insufficient_quota" in str(e):
-                                st.warning("OpenAI billing limit reached for transcription")
+                            error_str = str(e).lower()
+                            if "billing_hard_limit" in error_str or "insufficient_quota" in error_str or "429" in error_str:
+                                st.info("ℹ️ OpenAI limit reached - trying alternative services...")
+                                # Don't set success = False, just continue to next service
                             else:
-                                st.error(f"OpenAI transcription failed: {str(e)[:50]}...")
+                                st.warning(f"OpenAI failed: {str(e)[:50]}...")
+                                # Continue to next service
 
                     # Try a working transcription service - use local Whisper if possible
                     if not success:
